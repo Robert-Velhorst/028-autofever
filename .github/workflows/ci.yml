@@ -1,0 +1,84 @@
+name: Autofever CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autofever-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install pinned backend dependencies
+        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt
+
+      - name: Check dependency consistency
+        run: python -m pip check
+
+      - name: Run backend tests
+        run: python -W error::ResourceWarning -m unittest discover -s backend/tests -q
+
+  mobile-preview:
+    name: Mobile browser tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+
+      - name: Install pinned Playwright Chromium
+        run: npx.cmd --yes --package '@playwright/cli@0.1.22' playwright-cli install-browser chromium
+
+      - name: Run mobile browser suites against loopback only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $taskUrl = 'http://127.0.0.1:8000/'
+          $taskDirectory = (Resolve-Path 'illness-preview').Path
+          $taskServer = Start-Process -FilePath python -ArgumentList @('-m', 'http.server', '8000', '--bind', '127.0.0.1', '--directory', $taskDirectory) -PassThru -WindowStyle Hidden
+          try {
+            $taskDeadline = (Get-Date).AddSeconds(30)
+            $taskReady = $false
+            while ((Get-Date) -lt $taskDeadline) {
+              try {
+                $taskResponse = Invoke-WebRequest -Uri $taskUrl -TimeoutSec 2
+                if ($taskResponse.StatusCode -eq 200) { $taskReady = $true; break }
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $taskReady) { throw 'The loopback preview server did not become ready.' }
+            ./illness-preview/verify.ps1 -BaseUrl $taskUrl
+            if ($LASTEXITCODE -ne 0) { throw 'The mobile browser suites failed.' }
+          }
+          finally {
+            Stop-Process -Id $taskServer.Id -Force -ErrorAction SilentlyContinue
+          }
