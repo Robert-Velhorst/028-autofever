@@ -1,0 +1,156 @@
+openapi: 3.1.0
+info:
+  title: Autofever local recipient API
+  version: 0.1.0
+  description: |
+    Local development boundary only. Not deployed or connected to a provider.
+    Every request requires the exact configured Host. POST additionally requires
+    the exact configured Origin. Cross-site API requests and all query strings
+    are rejected. No cookies, CORS, public provisioning or owner operations.
+    Duplicate JSON keys and unknown body fields are rejected; body limit 8192 bytes.
+    Successful POST responses contain a fresh view; repeat acknowledgment and
+    repeating one's own accepted/completed action are safe. Concurrent episode
+    closure may yield 404 even when an earlier mutation committed: re-read, do not
+    infer rollback from a failed response. No production rate limiting yet.
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - recipientCapability: []
+paths:
+  /api/v1/recipient:
+    get:
+      operationId: readRecipient
+      summary: Read only this recipient's message and assigned tasks
+      description: Does not acknowledge the message or claim any task.
+      responses:
+        '200': {$ref: '#/components/responses/View'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/recipient/acknowledgment:
+    post:
+      operationId: acknowledgeRecipient
+      summary: Explicitly acknowledge reading the message
+      parameters:
+        - {$ref: '#/components/parameters/Origin'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200': {$ref: '#/components/responses/View'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/recipient/task-responses:
+    post:
+      operationId: respondToTask
+      summary: Accept, decline or complete assigned help
+      parameters:
+        - {$ref: '#/components/parameters/Origin'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [task_id, action]
+              properties:
+                task_id: {type: string, pattern: '^[A-Za-z0-9_-]{1,80}$'}
+                action: {type: string, enum: [accept, decline, complete]}
+      responses:
+        '200': {$ref: '#/components/responses/View'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Temporary'}
+components:
+  securitySchemes:
+    recipientCapability:
+      type: http
+      scheme: bearer
+      description: 43-character base64url recipient capability; never in a query string.
+  parameters:
+    Origin:
+      in: header
+      name: Origin
+      required: true
+      schema: {type: string}
+      description: Exact configured origin, including port.
+  schemas:
+    RecipientView:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [message, acknowledged, tasks]
+          properties:
+            message: {type: string}
+            acknowledged: {type: boolean}
+            tasks:
+              type: array
+              maxItems: 100
+              items:
+                type: object
+                additionalProperties: false
+                required: [id, title, timing, status, claimed_by_you, declined_by_you]
+                properties:
+                  id: {type: string}
+                  title: {type: string}
+                  timing: {type: string}
+                  status: {type: string, enum: [pending, accepted, completed, closed]}
+                  claimed_by_you: {type: boolean}
+                  declined_by_you: {type: boolean}
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+  responses:
+    View:
+      description: Current scoped recipient view. All responses use Cache-Control no-store.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/RecipientView'}
+    Error:
+      description: Generic error; no tokens, destinations, database details or other helper identities.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unavailable:
+      description: Identical response for missing, unknown, expired, closed or unauthorized capability/resource.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Temporary:
+      description: Internal or temporary failure; mutation outcome must not be assumed to have rolled back.
+      headers:
+        Retry-After:
+          schema: {type: string, const: '5'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}

@@ -4,9 +4,9 @@ AutoFever is a low-friction illness-notification application. It allows a user t
 
 The original idea is intentionally simple: configure the relevant recipients and practical help in advance, then use one prominent action when illness makes ordinary communication difficult. The completed service is intended to send an appropriate absence message, organize optional help, record actual delivery status, and later send a recovery notification. The current preview does not send messages.
 
-> **Project status — 13 October 2026:** a runnable, local-only mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts, profiles, drafts, help preferences, encrypted backup/restore and accessibility settings work locally. Actual delivery, recipient action links, reminders and production hosting are not connected. This is not a production-ready notification service.
+> **Project status — 13 October 2026:** a runnable, local-only mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts, profiles, drafts, help preferences, encrypted backup/restore and accessibility settings work locally. A separate local recipient page now reads and records help responses against the new backend. Actual delivery, the owner's preview-to-backend connection, reminders and production hosting are not connected. This is not a production-ready notification service.
 
-The new [backend service core](backend/README.md) implements persistent illness episodes, an encrypted outgoing queue, scoped recipient capabilities and task responses, with isolated synthetic-data tests. It is not connected to the browser, an HTTP service or a real message provider yet. The historical Flask routes below are not this new service's API.
+The new [backend service core and recipient interface](backend/README.md) implement persistent illness episodes, an encrypted outgoing queue, scoped recipient links and task responses. The local `/help` page lets a recipient explicitly acknowledge, accept, decline or complete assigned help without an account. It has automated service/HTTP tests and a real local Chromium interaction check using synthetic data. It is not connected to the owner's mobile preview or a real message provider. The historical Flask routes below are not this new service's API; the recipient contract is in [OpenAPI](backend/openapi.yaml).
 
 ## Try the Mobile Preview
 
@@ -306,7 +306,7 @@ The repository contains two separate development artifacts: a runnable browser p
 - `illness-preview/verify.ps1`: pinned Playwright CLI runner using isolated synthetic test contexts.
 - `illness-preview/README.md` and `VERIFICATION.md`: actual functionality, execution instructions and remaining gates.
 
-Profile editing, per-person messages, separate drafts, helper timing/repeat/backup preferences, active snapshots, local updates/recovery and large-text/high-contrast preferences are implemented here. Choosing a channel, repetition or reserve helper does not execute it. Help acceptance/completion requires the still-missing private recipient flow.
+Profile editing, per-person messages, separate drafts, helper timing/repeat/backup preferences, active snapshots, local updates/recovery and large-text/high-contrast preferences are implemented here. Choosing a channel, repetition or reserve helper does not execute it. The backend has a separate local private-recipient flow for help acceptance/completion, but these responses are not yet connected to this owner's preview.
 
 The correct preview was copied as source files only onto the current clean Git history. The rejected automotive implementation and old Git history are not part of this integration.
 

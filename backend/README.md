@@ -1,6 +1,6 @@
 # Autofever service core
 
-This is the first persistent backend component for the real notification/help/recovery chain. It is **an internal Python library, not a deployed API or a connected notification provider**. The mobile preview still uses its own browser storage. Do not expose this library directly to the internet or describe passing unit tests as message-delivery evidence.
+This is the persistent backend component for the notification/help/recovery chain, with a **local-only recipient web interface**. It is not deployed or connected to a real notification provider. The owner's mobile preview still uses its own browser storage. Do not expose the development listener to the internet or describe passing tests as message-delivery evidence.
 
 ## Run the tests
 
@@ -12,11 +12,11 @@ python -m venv backend/.venv
 ./backend/.venv/Scripts/python.exe -m unittest discover -s backend/tests -v
 ```
 
-On Linux, the environment's Python executable is `backend/.venv/bin/python`. The direct cryptography dependency is pinned; this is not yet a complete cross-platform deployment lockfile. Tests create disposable SQLite files and synthetic recipients under `.invalid`, generate only test capabilities, and inject in-process sender functions. They make no network requests and never read the mobile preview's browser database.
+On Linux, the environment's Python executable is `backend/.venv/bin/python`. The direct cryptography dependency is pinned; this is not yet a complete cross-platform deployment lockfile. Tests create disposable SQLite files and synthetic recipients under `.invalid`, generate only test capabilities, and inject in-process sender functions. The HTTP integration test uses an ephemeral loopback listener; no tests contact external providers or read the mobile preview's browser database.
 
 ## Implemented boundary
 
-`backend.service.Store` is the authoritative in-process interface. There is no HTTP contract yet. The types and allowed values below match the service's strict validation and the test fixtures; the eventual HTTP contract must be reviewed before connecting the browser.
+`backend.service.Store` is the authoritative in-process interface. The recipient HTTP subset is documented below and in [OpenAPI](openapi.yaml). Owner provisioning, activation, closing and dispatch remain trusted in-process operations, not public routes.
 
 | Operation | Inputs | Result and rules |
 | --- | --- | --- |
@@ -71,6 +71,37 @@ Implementation references: [Python SQLite transaction documentation](https://doc
 
 ## Verification checkpoint — 13 October 2026
 
-24 automated cases pass locally on Python 3.11.15 and cryptography 46.0.7. Coverage includes persistent idempotency, owner/recipient isolation, concurrent activation and job claims, exclusive task claims, private declines, acknowledgments, recovery targeting, cancellation, retries, ambiguous outcomes, worker crash leases, ciphertext substitution, wrong keys, transaction rollback and refusal to modify another application's database. Additional cases first exposed missing database-identity checks and missing recovery-order protection; they pass after the fixes.
+37 automated cases pass locally on Python 3.11.15 and cryptography 46.0.7: 24 service cases, 12 WSGI boundary cases and one real loopback HTTP integration case. Coverage includes persistent idempotency, owner/recipient isolation, concurrent activation and job claims, exclusive task claims, private declines, acknowledgments, recovery targeting, cancellation, retries, ambiguous outcomes, worker crash leases, ciphertext substitution, wrong keys, transaction rollback and refusal to modify another application's database. HTTP cases exercise origin/host restrictions, bearer scope, duplicate JSON fields, malformed bodies, size limits, method/path restrictions, generic errors and persistence across reopening the store.
 
-Remaining required work: HTTP authentication/provisioning and rate limits; browser integration without losing saved profile fields; real provider adapters and delivery evidence; recipient web pages; updates, reminders, recurrence, escalation, backup helpers and fallback channels; handling/reconciling uncertain jobs; deletion/retention, database backup/restore and key rotation; production dependency/security review; Linux and shared-host testing; HTTPS deployment on the existing `013-hire-ai` host as `028-autofever`. No new server, paid service, production data, real message or server configuration was used by this work.
+A separate local Chromium browser check exercised the actual HTTP service with disposable synthetic records, without mocked fetch: personal link, explicit acknowledgment, accept/decline/complete, second-helper conflict, offline error/reload recovery and missing/invalid-link states. Page identity, meaningful content, absence of framework overlays, clean successful-flow console, same-origin requests, stripped URL fragments, empty browser storage and screenshots were checked at 320, 390 and 1280 CSS-pixel widths. Deliberately induced offline/404/409 responses are expected errors, not successful operations. This is not physical-phone, Safari, screen-reader or production evidence.
+
+## Recipient web interface
+
+The Dutch page at `/help#RECIPIENT_CAPABILITY` shows only that recipient's message and assigned tasks. No account, app installation or owner capability is needed. Opening the page or fetching data does **not** acknowledge the message. The reader explicitly chooses **Ik heb dit gelezen**, **Ik pak dit op**, **Lukt me niet** or **Dit is gedaan**. A decline may be changed to acceptance while the task is available; accepted-task withdrawal is not yet implemented.
+
+The fragment is removed from the visible URL with `history.replaceState`; the token stays only in JavaScript memory and is sent in an Authorization header. It is not put in cookies, localStorage, sessionStorage or request URLs. Reloading therefore requires reopening the original link. The original message/link still contains the capability, and browser extensions, a compromised device or screenshots are outside this protection. Anyone with the link can exercise its scoped rights until expiry or episode closure.
+
+The page renders personal strings as text, uses local assets only, and has a restrictive content security policy, no-store responses, no-referrer policy and framing protection. GET returns no other contact identities or addresses. Conflicts and unknown network outcomes hide stale controls and require a fresh read before further action; no success is displayed without a successful response. Expired/closed/unknown links all return the same generic 404. An already displayed message is not remotely erased at the instant a link expires; the next request enforces expiry.
+
+| Route | Method | Body | Result |
+| --- | --- | --- | --- |
+| `/help`, `/help.css`, `/help.js`, `/favicon.svg` | GET | None | Fixed non-personal page/assets; no directory serving |
+| `/api/v1/recipient` | GET | None | `{data: {message, acknowledged, tasks}}` |
+| `/api/v1/recipient/acknowledgment` | POST | `{}` | Records explicit acknowledgment, returns updated recipient view |
+| `/api/v1/recipient/task-responses` | POST | `{task_id, action}` | `accept`, `decline` or `complete`; returns updated view |
+
+API calls require `Authorization: Bearer <recipient capability>`. Mutation requests additionally require the exact configured `Origin` and JSON content type. Bodies are limited to 8192 bytes; duplicate keys, unknown fields, wrong types and query strings are rejected. Codes: 400 invalid input, 403 origin/host restriction, 404 unavailable capability/resource, 405 method mismatch, 409 task conflict, 413 body too large, 415 wrong media type, 503 temporary/internal failure (generic message, Retry-After). No CORS access, owner routes, signup or dispatch routes are exposed. The OpenAPI file describes this initial boundary; it is not a generated client or a formal conformance certification.
+
+### Local development listener
+
+After trusted code has provisioned a dedicated store, run from the repo root:
+
+```powershell
+./backend/.venv/Scripts/python.exe -m backend.local --database C:/private/autofever/state.sqlite3 --port 8080
+```
+
+The path above is illustrative, not an existing provisioned database. `AUTOFEVER_STORE_KEY_HEX` must be supplied privately in the process environment as the store's 32-byte key encoded in 64 hex characters; do not paste it into Git, shared commands, logs or screenshots. The CLI does not generate an owner, create a database, choose a provider, activate an episode or send anything. It refuses missing/symlink databases and nonmatching keys. `make_local_server(store, 0)` is the test entry point for a random loopback port.
+
+This listener binds only `127.0.0.1`, uses exact Host/Origin checks and suppresses request logging, including accidentally pasted query secrets. A top-level navigation from an external message can open the generic page; cross-site API access cannot. The WSGI app itself currently refuses non-loopback origins. Do not forward/tunnel this port or replace the loopback binding to deploy it. The development server is single-process, has a ten-second connection timeout and has **no production rate limiter or edge protection**. See [Python's WSGI development-server documentation](https://docs.python.org/3/library/wsgiref.html#module-wsgiref.simple_server).
+
+Remaining required work: owner HTTP authentication/provisioning and safe device credential recovery; production rate limits and HTTP server; owner-browser integration without losing saved profile fields; real provider adapters and delivery evidence; updates, reminders, recurrence, escalation, backup helpers and fallback channels; handling/reconciling uncertain jobs; deletion/retention, database backup/restore and key rotation; production dependency/security review; English recipient UI; Linux and shared-host testing; HTTPS deployment on the existing `013-hire-ai` host as `028-autofever`. No new server, paid service, production data, real message or server configuration was used by this work.
