@@ -135,8 +135,12 @@ missing indexes, unexpected views/triggers, corrupt relationships, missing key
 checks, unknown metadata and failed record authentication. It verifies episode
 snapshot shape and encrypted job identities too. It is not a full semantic
 business-state proof, protection from a key-holding attacker, or provider-history
-reconciliation. The exact v1 schema comparison is intentionally strict: future
-schema changes need an explicit supported backup/restore version.
+reconciliation. The table schema comparison is intentionally strict: future
+schema changes need explicit backup/restore support. Database versions 1 and 2
+are accepted; version 2 adds encrypted owner-access records without changing
+tables. Their structure and owner binding are checked, and restore preserves
+both the version floor and disabled credentials under quarantine. See
+[owner access compatibility](owner-access.md#before-use-forward-only-database-compatibility).
 
 Private [owner enrollment](provisioning.md) adds authenticated `provision:` audit
 records, now recognized by this verifier. They contain hashes, not raw owner

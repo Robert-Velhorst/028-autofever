@@ -150,8 +150,11 @@ replacement of paths and hostile local filesystem access are outside this model.
 Creating an owner with a different new file creates a **different owner**, not a
 replacement credential for an existing owner and not access to their history.
 Deleting a credential file does **not** revoke the code. Owner capability
-rotation/revocation, lost-device recovery, credential transfer, key rotation and
-a nontechnical onboarding/recovery UI remain required work.
+rotation/revocation is available through the separate [private access CLI](owner-access.md),
+using the retained credential file and a coordinated software upgrade. Recovery
+without that file, credential transfer, key rotation and a nontechnical
+onboarding/recovery UI remain required work. `check-owner` also supports the
+replacement file; an original enrollment replay cannot re-enable a revoked code.
 
 Keep the original owner credential under separately protected recovery controls.
 Server [backups](backups.md) retain only its encrypted enrollment audit and owner

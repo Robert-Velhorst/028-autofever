@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from backend.dispatch_lock import delivery_lock
 from backend.hosted import read_secret
-from backend.service import Invalid, RecordCodec, SCHEMA, snapshot
+from backend.service import Invalid, RecordCodec, SCHEMA, snapshot, validate_access
 
 
 MAGIC = b'AUTOFEVER-BACKUP\x01'
@@ -57,7 +57,7 @@ def schema_rows(db):
 
 def check_identity(db, codec):
     if (db.execute('PRAGMA application_id').fetchone()[0] != 1095128625 or
-            db.execute('PRAGMA user_version').fetchone()[0] != 1):
+            db.execute('PRAGMA user_version').fetchone()[0] not in (1, 2)):
         raise Invalid('Unsupported service database')
     check = db.execute("SELECT value FROM metadata WHERE name='key-check'").fetchone()
     if check is None or codec.open('key-check', check[0]) != {'version': 1}:
@@ -110,6 +110,11 @@ def validate_database(path, key):
                 if not isinstance(value, dict) or set(value) != {
                         'decision', 'attempt', 'outcome', 'retry', 'result', 'recorded_at'}:
                     raise Invalid('Invalid reconciliation record')
+            elif re.fullmatch(r'owner-access:[0-9a-f]{64}', name):
+                validate_access(value)
+                if (db.execute('PRAGMA user_version').fetchone()[0] != 2 or
+                        not db.execute('SELECT 1 FROM owners WHERE id=?', (value['owner_hash'],)).fetchone()):
+                    raise Invalid('Invalid owner access binding or database version')
             elif re.fullmatch(r'provision:[0-9a-f-]{36}', name):
                 if (not isinstance(value, dict) or set(value) !=
                         {'version', 'owner_hash', 'credential_digest', 'created_at'} or

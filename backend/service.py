@@ -62,6 +62,18 @@ def token_hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def validate_access(value):
+    if (not isinstance(value, dict) or set(value) !=
+            {'version', 'owner_hash', 'enabled', 'credential_digest', 'created_at'} or
+            type(value['version']) is not int or value['version'] != 1 or
+            type(value['enabled']) is not bool or
+            type(value['created_at']) is not int or value['created_at'] < 0 or
+            any(not isinstance(value[k], str) or not re.fullmatch(r'[0-9a-f]{64}', value[k])
+                for k in ('owner_hash', 'credential_digest'))):
+        raise Invalid('Invalid owner access record')
+    return value
+
+
 def text(value, maximum, *, identifier=False):
     if not isinstance(value, str) or not value.strip() or len(value) > maximum or '\x00' in value:
         raise Invalid('Invalid text')
@@ -187,23 +199,23 @@ class Store(RecordCodec):
             version = db.execute('PRAGMA user_version').fetchone()[0]
             application = db.execute('PRAGMA application_id').fetchone()[0]
             tables = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
-            if (tables or version or application) and (application != 1095128625 or version != 1):
+            if (tables or version or application) and (application != 1095128625 or version not in (1, 2)):
                 raise Invalid('Not an Autofever service database')
-            if version == 1 and {x[0] for x in tables} != {'metadata', 'owners', 'episodes', 'recipients', 'tasks', 'declines', 'jobs'}:
+            if version in (1, 2) and {x[0] for x in tables} != {'metadata', 'owners', 'episodes', 'recipients', 'tasks', 'declines', 'jobs'}:
                 raise Invalid('Incomplete service database; restore rather than silently recreate tables')
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise Invalid('Unsupported database version')
             for statement in SCHEMA.split(';'):
                 if statement.strip():
                     db.execute(statement)
             check = db.execute("SELECT value FROM metadata WHERE name='key-check'").fetchone()
             if check is None:
-                if version == 1:
+                if version in (1, 2):
                     raise Invalid('Missing database key check')
                 db.execute('INSERT INTO metadata VALUES (?,?)', ('key-check', self.seal('key-check', {'version': 1})))
             elif self.open('key-check', check[0]) != {'version': 1}:
                 raise Invalid('Invalid database key')
-            db.execute('PRAGMA user_version=1')
+            db.execute('PRAGMA user_version=' + str(max(1, version)))
             db.execute('PRAGMA application_id=1095128625')
 
     @contextmanager
@@ -214,6 +226,10 @@ class Store(RecordCodec):
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
+            # Also reject unsupported versions on already-running Store objects.
+            # Every reader/writer must honor access revocation, not just startup.
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (0, 1, 2):
+                raise Invalid('Unsupported database version')
             # Checked on every transaction, including startup and read routes.
             # Presence alone blocks use even if the marker is damaged. An old
             # snapshot may contain valid but subsequently revoked capabilities.
@@ -237,6 +253,13 @@ class Store(RecordCodec):
 
     def _owner(self, db, token):
         owner = token_hash(token)
+        identity = 'owner-access:' + owner
+        row = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+        if row is not None:
+            access = validate_access(self.open(identity, row['value']))
+            if not access['enabled']:
+                raise Denied('Unavailable')
+            owner = access['owner_hash']
         if not db.execute('SELECT 1 FROM owners WHERE id=?', (owner,)).fetchone():
             raise Denied('Unavailable')
         return owner

@@ -84,9 +84,14 @@ def read_credential(store, path):
     if len(data) > MAX_CREDENTIAL_BYTES:
         raise Invalid('Oversized credential file')
     record = json.loads(data.decode('utf-8'), object_pairs_hook=unique_fields)
-    if not isinstance(record, dict) or set(record) != {'version', 'database', 'command', 'capability', 'mac'}:
+    if not isinstance(record, dict):
         raise Invalid('Invalid credential fields')
-    if type(record['version']) is not int or record['version'] != 1:
+    expected = {'version', 'database', 'command', 'capability', 'mac'}
+    if record.get('version') == 2:
+        expected |= {'owner_hash', 'previous_hash'}
+    if set(record) != expected:
+        raise Invalid('Invalid credential fields')
+    if type(record['version']) is not int or record['version'] not in (1, 2):
         raise Invalid('Unsupported credential version')
     if record['database'] != str(store.path.resolve()):
         raise Invalid('Credential belongs to a different database path')
@@ -97,10 +102,15 @@ def read_credential(store, path):
     payload = {name: value for name, value in record.items() if name != 'mac'}
     if not hmac.compare_digest(record['mac'], credential_mac(store, payload)):
         raise Invalid('Credential authentication failed')
+    if record['version'] == 2 and any(not isinstance(record[k], str) or
+            not re.fullmatch(r'[0-9a-f]{64}', record[k]) for k in ('owner_hash', 'previous_hash')):
+        raise Invalid('Invalid credential binding')
     return record
 
 
 def registration(store, db, record):
+    if record['version'] != 1:
+        raise Invalid('Replacement credential is not an enrollment')
     identity = 'provision:' + record['command']
     owner_hash = token_hash(record['capability'])
     digest = hashlib.sha256(encoded(record)).hexdigest()
@@ -112,6 +122,7 @@ def registration(store, db, record):
         raise Conflict('Enrollment command already has different content')
     if not db.execute('SELECT 1 FROM owners WHERE id=?', (owner_hash,)).fetchone():
         raise Denied('Owner no longer available; never re-enable through enrollment replay')
+    store._owner(db, record['capability'])
     return identity, owner_hash, digest, True
 
 
@@ -150,8 +161,12 @@ def provision_owner(store, credential_file, *, resume=False):
 def check_owner(store, credential_file):
     record = read_credential(store, credential_file)
     with store.transaction() as db:
-        if not registration(store, db, record)[3]:
-            raise Denied('Enrollment has not committed; explicit resume required')
+        if record['version'] == 1:
+            if not registration(store, db, record)[3]:
+                raise Denied('Enrollment has not committed; explicit resume required')
+        else:
+            from backend.owner_access import check_record
+            check_record(store, db, record)
         store._owner(db, record['capability'])
     return True
 
