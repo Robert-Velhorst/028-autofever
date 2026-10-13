@@ -190,6 +190,15 @@ def validate_update(value):
     return value
 
 
+def validate_checkin_record(value):
+    if (not isinstance(value, dict) or set(value) != {'version', 'command', 'confirmed_at'} or
+            type(value['version']) is not int or value['version'] != 1 or
+            type(value['confirmed_at']) is not int or value['confirmed_at'] < 0):
+        raise Invalid('Invalid check-in record')
+    text(value['command'], 128, identifier=True)
+    return value
+
+
 class RecordCodec:
     """Record encryption shared by the live store and offline backup verifier."""
 
@@ -377,9 +386,24 @@ class Store(RecordCodec):
             recipients = db.execute('SELECT recipient,acknowledged FROM recipients WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
             tasks = db.execute('SELECT id,state,claimant FROM tasks WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
             declines = db.execute('SELECT task,recipient FROM declines WHERE episode=?', (eid,)).fetchall()
-            return {'id': eid, 'state': row['state'], 'notifications': [dict(x) for x in jobs],
+            value = self.open(eid, row['data'])
+            checkin = None
+            prepared = value.get('preparation', {}).get('profile')
+            if row['state'] == 'active' and prepared:
+                identity = 'checkin:' + eid
+                saved = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+                confirmed = self.open(identity, saved['value']) if saved else None
+                if confirmed is not None:
+                    validate_checkin_record(confirmed)
+                last = confirmed['confirmed_at'] if confirmed else row['created']
+                interval = prepared['checkin'] * 3600
+                due = last + interval
+                checkin = {'interval_hours': prepared['checkin'],
+                           'last_confirmed_at': confirmed['confirmed_at'] if confirmed else None,
+                           'next_due_at': due, 'due': int(self.clock()) >= due}
+            return {'id': eid, 'state': row['state'], 'checkin': checkin, 'notifications': [dict(x) for x in jobs],
                     'updates': self.updates(db, eid),
-                    'snapshot': self.open(eid, row['data']),
+                    'snapshot': value,
                     'recipients': [{'id': r['recipient'], 'acknowledged': bool(r['acknowledged'])} for r in recipients],
                     'tasks': [{**dict(t), 'declined_by': [d['recipient'] for d in declines if d['task'] == t['id']]} for t in tasks]}
 
@@ -395,6 +419,35 @@ class Store(RecordCodec):
         except ValueError as error:
             raise Invalid('Invalid saved profile') from error
         return self.activate(owner_token, command, value, link_ttl=link_ttl)
+
+    def confirm_checkin(self, owner_token, eid, command):
+        text(command, 128, identifier=True)
+        with self.transaction() as db:
+            row = self._episode(db, owner_token, eid)
+            if row['state'] != 'active':
+                raise Conflict('Episode is closed')
+            value = self.open(eid, row['data'])
+            prepared = value.get('preparation', {}).get('profile')
+            if not prepared:
+                raise Conflict('No check-in preference is saved')
+            identity = 'checkin:' + eid
+            saved = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+            confirmed = self.open(identity, saved['value']) if saved else None
+            if confirmed is not None:
+                validate_checkin_record(confirmed)
+            if confirmed and confirmed['command'] == command:
+                return
+            now = int(self.clock())
+            interval = prepared['checkin'] * 3600
+            last = confirmed['confirmed_at'] if confirmed else row['created']
+            if now < last + interval:
+                raise Conflict('Check-in is not due yet')
+            record = {'version': 1, 'command': command, 'confirmed_at': now}
+            sealed = self.seal(identity, record)
+            if saved:
+                db.execute('UPDATE metadata SET value=? WHERE name=?', (sealed, identity))
+            else:
+                db.execute('INSERT INTO metadata VALUES (?,?)', (identity, sealed))
 
     def _capability(self, db, token):
         row = db.execute("SELECT r.*, e.data FROM recipients r JOIN episodes e ON e.id=r.episode "

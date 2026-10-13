@@ -91,6 +91,10 @@ window.AutofeverBridge = (() => {
           {episode_id:current.id,message:'',recipients:[]};
         return;
       }
+      if(name === 'checkin') {
+        if(current?.state !== 'active' || !current.checkin?.due) throw {userMessage:'Er staat nu geen check-in open. Haal de actuele serverstand op.'};
+        await save({...state,pending:{path:'episode-checkins',body:{episode_id:current.id,command:crypto.randomUUID()}}});
+      }
       if(name === 'save-update-draft') {
         await save({...state,updateDraft});
         ctx.say('Updateconcept versleuteld op dit apparaat bewaard. Niets verstuurd.');
@@ -155,7 +159,15 @@ window.AutofeverBridge = (() => {
         if(preference?.backup) html += '<p class="hint">Reserve: '+escape(person(preference.backup))+' · nog niet automatisch gevraagd.</p>';
         html += '</section>';
       }
-      if (prepared) html += '<p class="hint">Check-in: elke '+escape(prepared.profile.checkin)+' uur · bewaard, nog niet ingepland.</p>'+(prepared.profile.duration?'<p class="hint">Verwachte terugkeer: '+escape(prepared.profile.duration)+'</p>':'');
+      if (prepared && current.checkin) {
+        const nextCheckin = new Date(current.checkin.next_due_at*1000).toLocaleString('nl-NL');
+        html += '<section class="editor-block" aria-live="polite"><h2>Check-in</h2>'+
+          (current.checkin.due
+            ? '<p class="notice">Tijd om even bij jezelf in te checken. Dit is alleen zichtbaar in Autofever; er wordt niemand anders bericht.</p>'+button('Ik ben nog ziek · volgende check-in plannen','checkin','primary')
+            : '<p>Volgende check-in vanaf '+escape(nextCheckin)+'.</p>')+
+          '<p class="hint">Elke '+escape(current.checkin.interval_hours)+' uur · je bevestiging start de volgende termijn.</p></section>';
+      }
+      if (prepared?.profile.duration) html += '<p class="hint">Verwachte terugkeer: '+escape(prepared.profile.duration)+'</p>';
       if (!state.pending) html += '<div class="actions">'+(current.state==='active'?button('Update schrijven','compose','primary')+button('Ik ben hersteld','recover')+button('Gebeurtenis annuleren','cancel','text-button'):button('Nieuwe ziekmelding','activate','primary'))+'</div>';
     }
     html += '<div class="actions">'+button('Serverstand ophalen','refresh')+'</div>';
@@ -171,7 +183,7 @@ window.AutofeverBridge = (() => {
       const activate = document.querySelector('.activate');
       if (activate) {activate.disabled = !state.token || !!state.pending; activate.querySelector('span').textContent = state.token?'Start je opgeslagen plan op de server.':'Koppel eerst de server bij Jouw gegevens.';}
       const hint = document.querySelector('.readiness > p.hint');
-      if(hint) hint.textContent='De server bewaart de melding en wachtrij. Zonder bezorgdienst worden er geen berichten verstuurd. Herhaling, check-ins en reservehelpers zijn nog niet geautomatiseerd.';
+      if(hint) hint.textContent='De server bewaart de melding en wachtrij. Zonder bezorgdienst worden er geen berichten verstuurd. Check-ins zijn zichtbaar zodra je Autofever opent; herhaalde hulp en reservehelpers zijn nog niet geautomatiseerd.';
     }
     if (view !== 'settings') return;
     document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Lokale server koppelen</h2><p class="hint">Eenmalige privésleutel van de beheerder, geen nieuw account. Alleen deze server op dit adres. Bewaar de sleutel apart; de profielback-up bevat hem niet. De sleutel wordt hier versleuteld opgeslagen, met de browsersleutel op hetzelfde apparaat.</p>'+(state.token?'<p class="hint">Koppeling bewaard. Verlopen hulp-links sluiten na '+escape(state.hours)+' uur.</p>':'')+'<form id="owner-connect"><label for="owner-token">Privésleutel voor jouw meldingen</label><input id="owner-token" type="password" autocomplete="off" maxlength="43" required><label for="owner-hours">Geldigheid hulplink in uren</label><input id="owner-hours" type="number" min="1" max="168" value="'+escape(state.hours||24)+'" required><div class="actions"><button class="primary" type="submit">Koppeling controleren en bewaren</button></div></form><p class="hint">Terugzetten van een profielback-up wijzigt geen lopende servermelding. Meerdere kanalen per persoon en push zijn nog niet aangesloten; kies voor deze koppeling één beginkanaal.</p></section>');

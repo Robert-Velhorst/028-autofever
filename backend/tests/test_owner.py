@@ -87,6 +87,49 @@ class OwnerTests(unittest.TestCase):
         self.assertTrue(result['recipients'][0]['acknowledged'])
         self.assertEqual(result['tasks'][0]['state'], 'completed')
 
+    def test_checkin_is_private_due_only_and_repeatable_after_owner_confirmation(self):
+        now = [1_800_000_000]
+        self.store.clock = lambda: now[0]
+        episode = json.loads(self.activate()['body'])['data']
+        self.assertEqual(episode['checkin'], {'interval_hours': 4, 'last_confirmed_at': None,
+                                               'next_due_at': now[0] + 4 * 3600, 'due': False})
+        path = '/api/v1/owner/episode-checkins'
+        body = {'episode_id': episode['id'], 'command': 'checkin-one'}
+        self.assertEqual(self.request(path, 'POST', body, token=self.other)['status'], 404)
+        self.assertEqual(self.request(path, 'POST', body)['status'], 409)
+        now[0] += 4 * 3600
+        first = self.request(path, 'POST', body)
+        self.assertEqual(first['status'], 200)
+        checked_view = json.loads(first['body'])['data']
+        checked = checked_view['checkin']
+        self.assertEqual(checked, {'interval_hours': 4, 'last_confirmed_at': now[0],
+                                  'next_due_at': now[0] + 4 * 3600, 'due': False})
+        self.assertEqual(len(checked_view['notifications']), 2)
+        # An uncertain HTTP outcome can replay the same command without extending the interval.
+        now[0] += 60
+        self.assertEqual(self.request(path, 'POST', body)['status'], 200)
+        self.assertEqual(json.loads(self.request('/api/v1/owner/episode')['body'])['data']['checkin']['last_confirmed_at'], checked['last_confirmed_at'])
+        self.store = Store(self.path, self.key, clock=lambda: now[0])
+        self.app = OwnerApp(self.store, 'http://127.0.0.1:8080')
+        now[0] = checked['next_due_at']
+        due = json.loads(self.request('/api/v1/owner/episode')['body'])['data']['checkin']
+        self.assertTrue(due['due'])
+        self.assertEqual(due['next_due_at'], checked['next_due_at'])
+        replay = self.request(path, 'POST', body)
+        self.assertEqual(replay['status'], 200)
+        self.assertTrue(json.loads(replay['body'])['data']['checkin']['due'])
+        self.assertEqual(self.request(path, 'POST', {'episode_id': episode['id'], 'command': 'checkin-two'})['status'], 200)
+        self.assertFalse(json.loads(self.request('/api/v1/owner/episode')['body'])['data']['checkin']['due'])
+
+    def test_checkin_requires_active_prepared_episode_and_valid_command(self):
+        episode = json.loads(self.activate()['body'])['data']
+        path = '/api/v1/owner/episode-checkins'
+        malformed = self.request(path, 'POST', {'episode_id': episode['id'], 'command': 'bad command'})
+        self.assertEqual(malformed['status'], 400)
+        close = {'episode_id': episode['id'], 'state': 'cancelled', 'recovery_message': None}
+        self.assertEqual(self.request('/api/v1/owner/episode-closures', 'POST', close)['status'], 200)
+        self.assertEqual(self.request(path, 'POST', {'episode_id': episode['id'], 'command': 'checkin-one'})['status'], 409)
+
     def test_recovery_targets_accepted_only_and_closure_is_repeatable(self):
         episode = json.loads(self.activate()['body'])['data']
         self.store.dispatch_one(lambda item: 'synthetic-only')

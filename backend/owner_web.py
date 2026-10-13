@@ -13,6 +13,7 @@ OWNER_ROUTES = {
     '/api/v1/owner/episodes': 'POST',
     '/api/v1/owner/episode-closures': 'POST',
     '/api/v1/owner/episode-updates': 'POST',
+    '/api/v1/owner/episode-checkins': 'POST',
 }
 
 
@@ -56,6 +57,12 @@ class OwnerApp(RecipientApp):
                     not isinstance(value['episode_id'], str)):
                 raise RequestError(400)
             self.store.update(token, value['episode_id'], value['command'], value['message'], value['recipients'])
+            result = self.store.episode(token, value['episode_id'])
+        elif path.endswith('/episode-checkins'):
+            if (not isinstance(value, dict) or set(value) != {'episode_id', 'command'} or
+                    not isinstance(value['episode_id'], str) or not isinstance(value['command'], str)):
+                raise RequestError(400)
+            self.store.confirm_checkin(token, value['episode_id'], value['command'])
             result = self.store.episode(token, value['episode_id'])
         else:
             if not isinstance(value, dict) or set(value) != {'episode_id', 'state', 'recovery_message'}:

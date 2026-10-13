@@ -16,6 +16,7 @@ from backend.dispatch_lock import DeliveryBusy
 from backend.hosted import HostedApp
 from backend.owner_web import OwnerApp
 from backend.service import Invalid, RecordCodec, RestoreHeld, SendFailure, Store
+from backend.tests.test_owner import saved_contacts, saved_profile
 from backend.tests.test_service import plan
 
 
@@ -69,6 +70,21 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(record['backup_created_at'], created['backup_created_at'])
         self.assertEqual(len(record['archive_sha256']), 64)
         self.assert_no_staging()
+
+    def test_encrypted_owner_checkin_survives_backup_verification_and_restore(self):
+        self.store.close(self.owner, self.episode, 'cancelled')
+        episode = self.store.activate_profile(self.owner, 'saved-checkin', saved_profile(), saved_contacts(), link_ttl=3600)
+        self.clock += 4 * 3600
+        self.store.confirm_checkin(self.owner, episode, 'checkin-one')
+        with contextlib.closing(backup.readonly(self.path)) as db:
+            blob = db.execute('SELECT value FROM metadata WHERE name=?', ('checkin:' + episode,)).fetchone()[0]
+        self.assertNotIn(b'checkin-one', blob)
+        created = self.create()
+        self.assertEqual(backup.verify_backup(self.archive, self.key, work_directory=self.root), created)
+        self.restore()
+        restored_blob = dict(self.rows(self.restored, 'metadata'))['checkin:' + episode]
+        self.assertEqual(RecordCodec(self.key).open('checkin:' + episode, restored_blob),
+                         {'version': 1, 'command': 'checkin-one', 'confirmed_at': self.clock})
 
     def test_archive_encryption_randomization_and_private_file_mode(self):
         self.create()

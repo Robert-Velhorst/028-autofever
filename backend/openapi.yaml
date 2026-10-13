@@ -141,6 +141,40 @@ paths:
         '415': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/owner/episode-checkins:
+    post:
+      operationId: confirmOwnerCheckin
+      summary: Confirm a due check-in for the owner only
+      description: |
+        Requires the active owner episode and a saved profile check-in preference.
+        A check-in is due at activation plus the configured interval, then at the
+        same interval after each owner confirmation. It is shown when the owner
+        opens or refreshes Autofever; no push, email, SMS or helper message is sent.
+        Replaying the same command is safe. The response reports the next due time.
+      security: [{ownerCapability: []}]
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [episode_id, command]
+              properties:
+                episode_id: {type: string}
+                command: {type: string, pattern: '^[A-Za-z0-9_-]{1,128}$'}
+      responses:
+        '200': {$ref: '#/components/responses/OwnerView'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/recipient:
     get:
       operationId: readRecipient
@@ -283,7 +317,7 @@ components:
               when: {type: string, maxLength: 120}
               repeat: {type: string, enum: [once, daily, weekly]}
               backup: {type: string, maxLength: 80}
-      description: Saved profile only. Task IDs unique; assignees and nonempty backup must belong to recipients. Recurrence/check-ins/backup are preserved, not executed yet.
+      description: Saved profile only. Task IDs unique; assignees and nonempty backup must belong to recipients. Recurrence and backup are preserved, not executed. In-app owner check-ins use the saved interval; they never send messages.
     OwnerView:
       type: object
       additionalProperties: false
@@ -294,10 +328,21 @@ components:
             - {type: 'null'}
             - type: object
               additionalProperties: false
-              required: [id, state, snapshot, notifications, recipients, tasks, updates]
+              required: [id, state, checkin, snapshot, notifications, recipients, tasks, updates]
               properties:
                 id: {type: string}
                 state: {type: string, enum: [active, recovered, cancelled]}
+                checkin:
+                  oneOf:
+                    - {type: 'null'}
+                    - type: object
+                      additionalProperties: false
+                      required: [interval_hours, last_confirmed_at, next_due_at, due]
+                      properties:
+                        interval_hours: {type: integer, minimum: 1, maximum: 168}
+                        last_confirmed_at: {type: [integer, 'null']}
+                        next_due_at: {type: integer}
+                        due: {type: boolean}
                 snapshot:
                   type: object
                   required: [recipients, tasks]

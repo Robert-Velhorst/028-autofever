@@ -19,7 +19,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from backend.dispatch_lock import delivery_lock
 from backend.hosted import read_secret
-from backend.service import Invalid, RecordCodec, SCHEMA, SCHEMA_V3, snapshot, validate_access, validate_update
+from backend.service import (Invalid, RecordCodec, SCHEMA, SCHEMA_V3, snapshot,
+                             validate_access, validate_checkin_record, validate_update)
 
 
 MAGIC = b'AUTOFEVER-BACKUP\x01'
@@ -126,6 +127,16 @@ def validate_database(path, key):
                 jobs = db.execute("SELECT recipient FROM jobs WHERE episode=? AND kind='update' AND batch=?", (eid, command)).fetchall()
                 if {r[0] for r in jobs} != set(value['recipients']):
                     raise Invalid('Incomplete update jobs')
+            elif re.fullmatch(r'checkin:[0-9a-f-]{36}', name):
+                record = validate_checkin_record(value)
+                eid = name.split(':', 1)[1]
+                episode = db.execute('SELECT created,data FROM episodes WHERE id=?', (eid,)).fetchone()
+                if episode is None:
+                    raise Invalid('Check-in has no episode')
+                saved = snapshot(codec.open(eid, episode[1]))
+                profile = saved.get('preparation', {}).get('profile')
+                if not profile or record['confirmed_at'] < episode[0] + profile['checkin'] * 3600:
+                    raise Invalid('Check-in is outside its episode interval')
             elif re.fullmatch(r'provision:[0-9a-f-]{36}', name):
                 if (not isinstance(value, dict) or set(value) !=
                         {'version', 'owner_hash', 'credential_digest', 'created_at'} or

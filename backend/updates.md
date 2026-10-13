@@ -45,7 +45,8 @@ Account switching stays blocked while a prior command is unresolved.
   Already failed jobs are not automatically retried; their statuses stay visible.
 - Updates contain text only, no new recipient capability. They do not extend
   helper-link lifetime, change the saved profile/tasks, acknowledge reading or
-  count as recovery. Scheduled check-ins and automatic reminders remain absent.
+  count as recovery. Owner-only in-app check-ins are available through the owner
+  API; background reminders and notifications to helpers remain absent.
 - The original personal helper page shows only updates addressed to that
   recipient, even before email submission finishes. This is server availability,
   not email-delivery evidence. The reading button acknowledges the original
