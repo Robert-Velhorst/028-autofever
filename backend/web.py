@@ -171,7 +171,7 @@ class RecipientApp:
                 if (not isinstance(value, dict) or set(value) != {'task_id', 'action'} or
                         not isinstance(value['task_id'], str) or
                         not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', value['task_id']) or
-                        value['action'] not in ('accept', 'decline', 'complete')):
+                        value['action'] not in ('accept', 'decline', 'complete', 'withdraw')):
                     raise RequestError(400)
                 self.store.respond(token, value['task_id'], value['action'])
         body = json.dumps({'data': self.store.recipient(token)}, ensure_ascii=False).encode()

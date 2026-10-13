@@ -9,6 +9,7 @@
       ackCopy: 'Deze leesbevestiging geldt voor het oorspronkelijke bericht, niet voor latere updates.',
       ackHint: 'Alleen openen telt niet als een bevestiging.', updates: 'Updates voor jou',
       tasks: 'Kun je iets doen?', tasksIntro: 'Kies wat lukt. Nee zeggen mag ook.',
+      withdrawalHint: 'Kun je na aanvaarden toch niet helpen? Trek je toezegging in; de hulpvraag komt weer vrij voor andere uitgenodigde helpers. Zij krijgen geen automatisch bericht.',
       noTasks: 'Er zijn geen hulpvragen voor jou.', footer: 'Deze link geeft toegang tot jouw bericht. Deel hem niet. Bij opnieuw laden open je de oorspronkelijke link opnieuw.',
       noScript: 'Schakel JavaScript in om je persoonlijke bericht te openen en te reageren.',
       unavailable: 'Deze link is niet beschikbaar. Open de oorspronkelijke link, of vraag de afzender om een nieuwe.',
@@ -19,6 +20,7 @@
       acceptedByYou: 'Jij pakt dit op.', acceptedByOther: 'Iemand anders pakt dit op.',
       completed: 'Afgerond. Dank je wel.', closed: 'Deze hulpvraag is gesloten.',
       accept: 'Ik pak dit op', acceptAfterDecline: 'Ik kan toch helpen', decline: 'Lukt me niet', complete: 'Dit is gedaan',
+      withdraw: 'Ik kan toch niet helpen',
       switchLanguage: 'Wissel naar Engels',
     },
     en: {
@@ -29,6 +31,7 @@
       ackCopy: 'This confirmation applies to the original message, not to later updates.',
       ackHint: 'Opening the page alone does not count as confirmation.', updates: 'Updates for you',
       tasks: 'Can you help?', tasksIntro: 'Choose what works for you. It is okay to say no.',
+      withdrawalHint: 'If you can no longer help after accepting, withdraw your commitment. The request becomes available to other invited helpers; they are not notified automatically.',
       noTasks: 'There are no help requests for you.', footer: 'This link gives access to your message. Do not share it. If you reload, open the original link again.',
       noScript: 'Enable JavaScript to open your personal message and respond.',
       unavailable: 'This link is unavailable. Open the original link or ask the sender for a new one.',
@@ -39,6 +42,7 @@
       acceptedByYou: 'You are taking this on.', acceptedByOther: 'Someone else is taking this on.',
       completed: 'Completed. Thank you.', closed: 'This help request is closed.',
       accept: 'I can help', acceptAfterDecline: 'I can help after all', decline: 'I cannot help', complete: 'This is done',
+      withdraw: "I can't help after all",
       switchLanguage: 'Switch language to Dutch',
     }
   };
@@ -61,6 +65,7 @@
     document.getElementById('updates').setAttribute('aria-label', t('updates'));
     document.getElementById('tasks-title').textContent = t('tasks');
     document.getElementById('tasks-intro').textContent = t('tasksIntro');
+    document.getElementById('task-withdrawal-hint').textContent = t('withdrawalHint');
     document.getElementById('page-footer').textContent = t('footer');
     const noscript = document.getElementById('noscript-copy');
     if (noscript) noscript.textContent = t('noScript');
@@ -158,7 +163,10 @@
         add(task.declined_by_you ? t('acceptAfterDecline') : t('accept'), 'accept');
         if (!task.declined_by_you) add(t('decline'), 'decline', true);
       }
-      if (task.status === 'accepted' && task.claimed_by_you) add(t('complete'), 'complete');
+      if (task.status === 'accepted' && task.claimed_by_you) {
+        add(t('complete'), 'complete');
+        add(t('withdraw'), 'withdraw', true);
+      }
       article.append(actions);
       byId('tasks').append(article);
     }

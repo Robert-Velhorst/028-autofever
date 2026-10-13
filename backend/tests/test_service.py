@@ -89,6 +89,56 @@ class ServiceTests(unittest.TestCase):
         self.store.respond(alice, 'food', 'complete')
         self.assertEqual(self.store.recipient(alice)['tasks'][0]['status'], 'completed')
 
+    def test_claimant_can_withdraw_task_for_other_helpers_and_retry_safely(self):
+        episode = self.activate()
+        envelopes = []
+        while self.store.dispatch_one(lambda item: envelopes.append(item) or 'p'):
+            pass
+        alice, bob = [x['action_token'] for x in envelopes]
+        notifications_before = self.store.episode(self.owner, episode)['notifications']
+
+        self.store.respond(alice, 'food', 'accept')
+        self.store.respond(alice, 'food', 'withdraw')
+        self.store.respond(alice, 'food', 'withdraw')  # lost response replay
+
+        alice_task = self.store.recipient(alice)['tasks'][0]
+        bob_task = self.store.recipient(bob)['tasks'][0]
+        owner_task = self.store.episode(self.owner, episode)['tasks'][0]
+        self.assertEqual(alice_task['status'], 'pending')
+        self.assertTrue(alice_task['declined_by_you'])
+        self.assertEqual(bob_task['status'], 'pending')
+        self.assertFalse(bob_task['declined_by_you'])
+        self.assertEqual(owner_task, {'id': 'food', 'state': 'pending', 'claimant': None,
+                                      'declined_by': ['alice']})
+
+        self.store.respond(bob, 'food', 'accept')
+        owner_task = self.store.episode(self.owner, episode)['tasks'][0]
+        self.assertEqual(owner_task['state'], 'accepted')
+        self.assertEqual(owner_task['claimant'], 'bob')
+        self.assertEqual(self.store.episode(self.owner, episode)['notifications'], notifications_before)
+        self.assertEqual(owner_task['declined_by'], ['alice'])
+        self.store.respond(alice, 'food', 'withdraw')  # A delayed replay must not disturb Bob's claim.
+        owner_task = self.store.episode(self.owner, episode)['tasks'][0]
+        self.assertEqual(owner_task['state'], 'accepted')
+        self.assertEqual(owner_task['claimant'], 'bob')
+
+    def test_only_current_claimant_can_withdraw_and_completed_task_cannot_reopen(self):
+        self.activate()
+        envelopes = []
+        while self.store.dispatch_one(lambda item: envelopes.append(item) or 'p'):
+            pass
+        alice, bob = [x['action_token'] for x in envelopes]
+        with self.assertRaises(Conflict):
+            self.store.respond(alice, 'food', 'withdraw')
+        self.store.respond(alice, 'food', 'accept')
+        with self.assertRaises(Denied):
+            self.store.respond(bob, 'food', 'withdraw')
+        self.assertEqual(self.store.recipient(bob)['tasks'][0]['status'], 'accepted')
+        self.store.respond(alice, 'food', 'complete')
+        with self.assertRaises(Conflict):
+            self.store.respond(alice, 'food', 'withdraw')
+        self.assertEqual(self.store.recipient(alice)['tasks'][0]['status'], 'completed')
+
     def test_unassigned_task_is_not_visible_or_mutable(self):
         source = plan()
         source['tasks'][0]['assignees'] = ['alice']

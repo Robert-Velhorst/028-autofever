@@ -11,7 +11,7 @@ info:
     Duplicate JSON keys and unknown body fields are rejected; body limit 8192 bytes
     except owner profile activation (2 MiB) and episode updates (32768 bytes).
     Successful POST responses contain a fresh view; repeat acknowledgment and
-    repeating one's own accepted/completed action are safe. Concurrent episode
+    repeating one's own accepted/completed/withdrawn action are safe. Concurrent episode
     closure may yield 404 even when an earlier mutation committed: re-read, do not
     infer rollback from a failed response. HostedApp adds bounded per-process
     global, client-IP and bearer quotas (429, Retry-After 60); development mode does not.
@@ -346,7 +346,12 @@ paths:
   /api/v1/recipient/task-responses:
     post:
       operationId: respondToTask
-      summary: Accept, decline or complete assigned help
+      summary: Accept, decline, complete or withdraw assigned help
+      description: |
+        Only the current claimant can complete or withdraw an accepted task.
+        Withdrawal returns it to pending for other assigned helpers and records
+        that the claimant cannot help. Replaying the withdrawal is safe. No
+        helper notification is sent by this action.
       parameters:
         - {$ref: '#/components/parameters/Origin'}
       requestBody:
@@ -359,7 +364,7 @@ paths:
               required: [task_id, action]
               properties:
                 task_id: {type: string, pattern: '^[A-Za-z0-9_-]{1,80}$'}
-                action: {type: string, enum: [accept, decline, complete]}
+                action: {type: string, enum: [accept, decline, complete, withdraw]}
       responses:
         '200': {$ref: '#/components/responses/View'}
         '400': {$ref: '#/components/responses/Error'}

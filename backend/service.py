@@ -641,7 +641,7 @@ class Store(RecordCodec):
             db.execute('UPDATE recipients SET acknowledged=1 WHERE token=?', (row['token'],))
 
     def respond(self, token, tid, action):
-        if action not in ('accept', 'decline', 'complete'):
+        if action not in ('accept', 'decline', 'complete', 'withdraw'):
             raise Invalid('Unknown response')
         with self.transaction() as db:
             row, value = self._capability(db, token)
@@ -660,6 +660,19 @@ class Store(RecordCodec):
             elif action == 'decline':
                 if state['state'] != 'pending':
                     raise Conflict('Task is no longer available')
+                db.execute('INSERT OR IGNORE INTO declines VALUES (?,?,?)', (*args, row['recipient']))
+            elif action == 'withdraw':
+                declined = db.execute('SELECT 1 FROM declines WHERE episode=? AND task=? AND recipient=?',
+                                      (*args, row['recipient'])).fetchone()
+                if declined:
+                    return  # A replay remains safe even if another helper has since accepted it.
+                if state['state'] == 'pending':
+                    raise Conflict('Task is not currently accepted')
+                if state['claimant'] != row['recipient']:
+                    raise Denied('Unavailable')
+                if state['state'] != 'accepted':
+                    raise Conflict('Task cannot be withdrawn')
+                db.execute("UPDATE tasks SET state='pending',claimant=NULL WHERE episode=? AND id=?", args)
                 db.execute('INSERT OR IGNORE INTO declines VALUES (?,?,?)', (*args, row['recipient']))
             else:
                 if state['claimant'] != row['recipient']:

@@ -67,6 +67,21 @@ class WebTests(unittest.TestCase):
         completed = self.request(path, 'POST', {'task_id': 'food', 'action': 'complete'})
         self.assertEqual(json.loads(completed['body'])['data']['tasks'][0]['status'], 'completed')
 
+    def test_claimant_can_withdraw_and_retry_the_recipient_task_action(self):
+        path = '/api/v1/recipient/task-responses'
+        accepted = self.request(path, 'POST', {'task_id': 'food', 'action': 'accept'})
+        self.assertEqual(accepted['status'], 200)
+        withdrawn = self.request(path, 'POST', {'task_id': 'food', 'action': 'withdraw'})
+        self.assertEqual(withdrawn['status'], 200)
+        task = json.loads(withdrawn['body'])['data']['tasks'][0]
+        self.assertEqual(task['status'], 'pending')
+        self.assertTrue(task['declined_by_you'])
+
+        replay = self.request(path, 'POST', {'task_id': 'food', 'action': 'withdraw'})
+        self.assertEqual(replay['status'], 200)
+        self.assertEqual(json.loads(replay['body'])['data']['tasks'][0]['status'], 'pending')
+        self.assertNotIn(self.token.encode(), withdrawn['body'])
+
     def test_invalid_owner_expired_and_closed_capabilities_have_same_error(self):
         expected = self.request('/api/v1/recipient', token='x' * 43)
         owner = self.request('/api/v1/recipient', token=self.owner)
