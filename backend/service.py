@@ -402,6 +402,21 @@ class Store(RecordCodec):
         recipients = db.execute('SELECT recipient,acknowledged FROM recipients WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
         tasks = db.execute('SELECT id,state,claimant FROM tasks WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
         declines = db.execute('SELECT task,recipient FROM declines WHERE episode=?', (eid,)).fetchall()
+        recovery = None
+        if row['state'] == 'recovered':
+            recovery_jobs = db.execute("SELECT id,recipient,payload FROM jobs WHERE episode=? AND kind='recovery' ORDER BY rowid", (eid,)).fetchall()
+            for job in recovery_jobs:
+                envelope = self.open(job['id'], job['payload'])
+                if (not isinstance(envelope, dict) or envelope.get('id') != job['id'] or
+                        envelope.get('episode_id') != eid or envelope.get('recipient_id') != job['recipient'] or
+                        envelope.get('kind') != 'recovery' or not isinstance(envelope.get('message'), str) or
+                        not envelope['message'].strip()):
+                    raise Invalid('Invalid encrypted recovery job')
+                if recovery is None:
+                    recovery = {'message': envelope['message'], 'recipients': []}
+                elif recovery['message'] != envelope['message']:
+                    raise Invalid('Recovery jobs disagree on the message')
+                recovery['recipients'].append(job['recipient'])
         value = self.open(eid, row['data'])
         checkin = None
         prepared = value.get('preparation', {}).get('profile')
@@ -417,7 +432,7 @@ class Store(RecordCodec):
             checkin = {'interval_hours': prepared['checkin'],
                        'last_confirmed_at': confirmed['confirmed_at'] if confirmed else None,
                        'next_due_at': due, 'due': row['state'] == 'active' and int(self.clock()) >= due}
-        return {'id': eid, 'state': row['state'], 'checkin': checkin, 'notifications': [dict(x) for x in jobs],
+        return {'id': eid, 'state': row['state'], 'checkin': checkin, 'recovery': recovery, 'notifications': [dict(x) for x in jobs],
                 'updates': self.updates(db, eid), 'snapshot': value,
                 'recipients': [{'id': r['recipient'], 'acknowledged': bool(r['acknowledged'])} for r in recipients],
                 'tasks': [{**dict(t), 'declined_by': [d['recipient'] for d in declines if d['task'] == t['id']]} for t in tasks]}
@@ -653,11 +668,20 @@ class Store(RecordCodec):
                     raise Conflict('Task cannot be completed')
                 db.execute("UPDATE tasks SET state='completed' WHERE episode=? AND id=?", args)
 
-    def close(self, owner_token, eid, state, recovery_message=None):
+    def close(self, owner_token, eid, state, recovery_message=None, recovery_recipients=None):
         if state not in ('recovered', 'cancelled'):
             raise Invalid('Invalid closing state')
         if state == 'recovered':
             text(recovery_message, 10000)
+            if recovery_recipients is not None:
+                if not isinstance(recovery_recipients, list) or not recovery_recipients or len(recovery_recipients) > 100:
+                    raise Invalid('Choose one or more unique recovery recipients')
+                for recipient in recovery_recipients:
+                    text(recipient, 80, identifier=True)
+                if len(set(recovery_recipients)) != len(recovery_recipients):
+                    raise Invalid('Choose one or more unique recovery recipients')
+        elif recovery_recipients not in (None, []):
+            raise Invalid('Cancellation cannot select recovery recipients')
         with self.transaction() as db:
             row = self._episode(db, owner_token, eid)
             if row['state'] == state:
@@ -669,8 +693,11 @@ class Store(RecordCodec):
             if state == 'recovered':
                 value = self.open(eid, row['data'])
                 informed = {x[0] for x in db.execute("SELECT recipient FROM jobs WHERE episode=? AND kind='illness' AND status='accepted'", (eid,))}
+                selected = informed if recovery_recipients is None else set(recovery_recipients)
+                if not selected or not selected <= informed:
+                    raise Conflict('Recovery recipients must have an accepted initial notification')
                 for recipient in value['recipients']:
-                    if recipient['id'] in informed:
+                    if recipient['id'] in selected:
                         self._job(db, eid, {**recipient, 'message': recovery_message}, 'recovery', int(self.clock()))
             db.execute("UPDATE jobs SET status='cancelled' WHERE episode=? AND kind IN ('illness','update') AND status='queued'", (eid,))
             db.execute("UPDATE tasks SET state='closed' WHERE episode=? AND state!='completed'", (eid,))

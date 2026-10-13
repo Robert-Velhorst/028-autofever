@@ -16,15 +16,17 @@ async (page) => {
   const senderMessage='Ik ben onverwacht ziek. Laat me vooral even weten hoe het gaat.';
   let episode={
     id:'synthetic-episode',state:'active',
-    snapshot:{preparation:{profile:{name:'Synthetic episode',duration:'',recovery:'',tasks:[]},contacts:[{id:'maya',name:'Maya'}]},recipients:[{id:'maya',message:senderMessage}],tasks:[]},
-    notifications:[{recipient:'maya',kind:'illness',status:'accepted'}],
-    recipients:[{id:'maya',acknowledged:false}],tasks:[],updates:[],
+    snapshot:{preparation:{profile:{name:'Synthetic episode',duration:'',recovery:'I am feeling better. Thank you!',tasks:[]},contacts:[{id:'maya',name:'Maya'},{id:'jules',name:'Jules'}]},recipients:[{id:'maya',message:senderMessage},{id:'jules',message:'I am sick and will not be able to join the meeting.'}],tasks:[]},
+    notifications:[{recipient:'maya',kind:'illness',status:'accepted'},{recipient:'jules',kind:'illness',status:'accepted'}],
+    recipients:[{id:'maya',acknowledged:false},{id:'jules',acknowledged:false}],tasks:[],updates:[],
     checkin:{due:true,next_due_at:1800000000,interval_hours:4}
   };
   const responses=[];
   const updateRequests=[];
+  const closureRequests=[];
   app.on('request',request=>{
     if(new URL(request.url()).pathname.endsWith('/episode-updates')) updateRequests.push(request.postDataJSON());
+    if(new URL(request.url()).pathname.endsWith('/episode-closures')) closureRequests.push(request.postDataJSON());
   });
   try {
     await app.goto(base.href);
@@ -73,6 +75,13 @@ async (page) => {
         episode.updates.push({command:body.command,message:body.message,recipients:body.recipients,created_at:1800000000});
         return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:episode})});
       }
+      if(path.endsWith('/episode-closures')) {
+        const body=request.postDataJSON();
+        episode.state=body.state;
+        episode.recovery={message:body.recovery_message,recipients:body.recovery_recipients};
+        for(const recipient of body.recovery_recipients) episode.notifications.push({recipient,kind:'recovery',status:'queued'});
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:episode})});
+      }
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{}})});
     });
     await app.goto(ownerUrl);
@@ -103,7 +112,7 @@ async (page) => {
     await app.getByRole('button',{name:'Home',exact:true}).click();
     await app.getByRole('button',{name:'Write an update',exact:true}).click();
     await app.locator('#owner-update-message').fill('I will be offline briefly; this update should be queued once.');
-    await app.locator('#owner-update input[name="recipient"]').check();
+    await app.locator('#owner-update input[name="recipient"][value="maya"]').check();
     offlineActionInProgress=true;
     await context.setOffline(true);
     await app.getByRole('button',{name:'Queue update',exact:true}).click();
@@ -116,11 +125,22 @@ async (page) => {
     check(JSON.stringify(updateRequests[0])===JSON.stringify(updateRequests[1]),'Reconnect generated a new command instead of retrying the same idempotent command');
     await app.getByText('I will be offline briefly; this update should be queued once.',{exact:true}).waitFor();
     check(episode.updates.length===1,'Reconnect created a duplicate update');
+    await app.getByRole('button',{name:'I have recovered',exact:true}).click();
+    await app.getByRole('heading',{name:'Recovery message',exact:true}).waitFor();
+    await app.locator('#owner-recovery-message').fill('Glad to be back. Thanks for your help!');
+    await app.locator('#owner-recovery input[name="recipient"][value="jules"]').uncheck();
+    await app.getByRole('button',{name:'Queue recovery notice',exact:true}).click();
+    await app.getByText('Recovery recorded on the server.',{exact:true}).waitFor();
+    await app.getByText('Glad to be back. Thanks for your help!',{exact:true}).waitFor();
+    check(closureRequests.length===1,'Recovery editor did not submit exactly one closure request');
+    check(closureRequests[0].recovery_message==='Glad to be back. Thanks for your help!','Custom recovery message was not preserved');
+    check(JSON.stringify(closureRequests[0].recovery_recipients)===JSON.stringify(['maya']),'Recovery recipients did not respect the explicit subset');
+    check(episode.notifications.filter(item=>item.kind==='recovery').map(item=>item.recipient).join(',')==='maya','A nonselected person received a recovery notice');
     check(errors.length===0,`Browser errors: ${errors.join(' | ')}`);
     for(const width of [320,390,1280]) {
       await app.setViewportSize({width,height:844});
       check(await app.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Horizontal overflow at ${width}px`);
     }
-    return 'PASS: profile/settings/owner localization, encrypted pending action, bounded idempotent reconnect retry, no premature acceptance, private content and mobile widths';
+    return 'PASS: profile/settings localization, encrypted reconnect retry, editable recovery text and recipient subset, no premature acceptance, privacy and mobile widths';
   } finally { await context.close(); }
 }

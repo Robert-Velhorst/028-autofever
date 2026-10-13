@@ -254,7 +254,14 @@ paths:
                 episode_id: {type: string}
                 state: {type: string, enum: [recovered, cancelled]}
                 recovery_message: {type: [string, 'null'], maxLength: 10000}
-              description: Cancellation requires null; recovery requires nonempty text. Repeating a terminal state does not replace its original message.
+                recovery_recipients:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items: {type: string, pattern: '^[A-Za-z0-9_-]{1,80}$'}
+                  description: Optional on recovery for compatibility; when supplied, every id must have an accepted initial illness notification. Omit to notify all eligible recipients. Cancellation requires an empty array or omission.
+              description: Recovery requires nonempty text and queues only to accepted initial recipients, optionally limited to a selected subset. Cancellation requires a null message. Repeating a terminal state does not create or replace recovery notices.
       responses:
         '200': {$ref: '#/components/responses/OwnerView'}
         '400': {$ref: '#/components/responses/Error'}
@@ -453,7 +460,7 @@ components:
             - {type: 'null'}
             - type: object
               additionalProperties: false
-              required: [id, state, checkin, snapshot, notifications, recipients, tasks, updates]
+              required: [id, state, checkin, recovery, snapshot, notifications, recipients, tasks, updates]
               properties:
                 id: {type: string}
                 state: {type: string, enum: [active, recovered, cancelled]}
@@ -468,6 +475,16 @@ components:
                         last_confirmed_at: {type: [integer, 'null']}
                         next_due_at: {type: integer}
                         due: {type: boolean}
+                recovery:
+                  oneOf:
+                    - {type: 'null'}
+                    - type: object
+                      additionalProperties: false
+                      required: [message, recipients]
+                      properties:
+                        message: {type: string, maxLength: 10000}
+                        recipients: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/Identifier'}}
+                  description: Owner-only recovery text and recipients, derived from encrypted recovery queue records; null when no recovery notice was queued.
                 snapshot:
                   type: object
                   required: [recipients, tasks]
@@ -535,7 +552,7 @@ components:
               items:
                 type: object
                 additionalProperties: false
-                required: [created_at, id, state, checkin, snapshot, notifications, updates, recipients, tasks]
+                required: [created_at, id, state, checkin, recovery, snapshot, notifications, updates, recipients, tasks]
                 properties:
                   created_at: {type: integer}
                   id: {type: string}
@@ -550,6 +567,15 @@ components:
                           last_confirmed_at: {type: [integer, 'null']}
                           next_due_at: {type: integer}
                           due: {type: boolean}
+                  recovery:
+                    oneOf:
+                      - {type: 'null'}
+                      - type: object
+                        additionalProperties: false
+                        required: [message, recipients]
+                        properties:
+                          message: {type: string, maxLength: 10000}
+                          recipients: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/Identifier'}}
                   snapshot: {type: object, description: Owner-only immutable episode snapshot; capability tokens are excluded.}
                   notifications:
                     type: array

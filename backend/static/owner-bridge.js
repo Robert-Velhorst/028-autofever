@@ -1,7 +1,7 @@
 'use strict';
 window.AutofeverBridge = (() => {
   let ctx, state = {}, revision = 0, current = null, error = '', working = false, retentionDays = null;
-  let composing = false, updateDraft = null, retryTimer = null, retryEpoch = 0;
+  let composing = false, updateDraft = null, composingRecovery = false, recoveryDraft = null, retryTimer = null, retryEpoch = 0;
   const retryDelays = [1000, 5000, 15000];
   const labels = {queued:'In wachtrij · niet verstuurd',sending:'Wordt aangeboden · uitkomst nog onbekend',accepted:'Aangenomen door de bezorgdienst · bezorging niet bevestigd',failed:'Niet verstuurd · mislukt',uncertain:'Verzenduitkomst onzeker · controle nodig',cancelled:'Geannuleerd · niet verstuurd'};
   const button = (label, action, cls='secondary') => '<button type="button" class="'+cls+'" data-owner-action="'+action+'">'+label+'</button>';
@@ -65,7 +65,7 @@ window.AutofeverBridge = (() => {
   async function run(operation) {
     if (working) return;
     working = true;
-    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-export input,#owner-export button,#owner-retention input,#owner-retention button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
+    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-recovery input,#owner-recovery textarea,#owner-recovery button,#owner-export input,#owner-export button,#owner-retention input,#owner-retention button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
     try { error = ''; await operation(); }
     catch (exc) { error = failure(exc); }
     finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); schedulePendingRetry(); }
@@ -76,8 +76,9 @@ window.AutofeverBridge = (() => {
     try {
       current = await api(pending.path, pending.body);
       stopPendingRetry();
-      await save({...state,pending:null,...(pending.path === 'episode-updates' ? {updateDraft:null} : {})});
+      await save({...state,pending:null,...(pending.path === 'episode-updates' ? {updateDraft:null} : {}),...(pending.path === 'episode-closures' ? {recoveryDraft:null} : {})});
       if(pending.path === 'episode-updates') {composing = false; updateDraft = null;}
+      if(pending.path === 'episode-closures') {composingRecovery = false; recoveryDraft = null;}
       ctx.say('Serverstand bijgewerkt. Een wachtrijstatus is geen bewijs van bezorging.');
     } catch (exc) {
       // These responses precede mutation; unknown/network outcomes retain the same command.
@@ -92,7 +93,8 @@ window.AutofeverBridge = (() => {
     current = await api('episode');
     if (state.pending?.path === 'episode-closures' && current?.id === state.pending.body.episode_id && current.state === state.pending.body.state) {
       stopPendingRetry();
-      await save({...state,pending:null});
+      await save({...state,pending:null,recoveryDraft:null});
+      composingRecovery = false; recoveryDraft = null;
     }
     if (state.pending?.path === 'episode-updates' && current?.id === state.pending.body.episode_id) {
       const submitted = state.pending.body;
@@ -129,6 +131,17 @@ window.AutofeverBridge = (() => {
           {episode_id:current.id,message:'',recipients:[]};
         return;
       }
+      if(name === 'recover') {
+        if(current?.state !== 'active') throw {userMessage:'Haal eerst de actuele actieve melding op.'};
+        const savedMessage = current.snapshot.preparation?.profile.recovery;
+        if(!savedMessage) throw {userMessage:'Deze melding heeft geen opgeslagen hersteltekst.'};
+        const eligible = current.snapshot.recipients.filter(r => current.notifications.some(j => j.recipient === r.id && j.kind === 'illness' && j.status === 'accepted'));
+        recoveryDraft = recoveryDraft?.episode_id === current.id ? structuredClone(recoveryDraft) :
+          state.recoveryDraft?.episode_id === current.id ? structuredClone(state.recoveryDraft) :
+          {episode_id:current.id,message:savedMessage,recipients:eligible.map(r=>r.id)};
+        composingRecovery = true;
+        return;
+      }
       if(name === 'checkin') {
         if(current?.state !== 'active' || !current.checkin?.due) throw {userMessage:'Er staat nu geen check-in open. Haal de actuele serverstand op.'};
         await save({...state,pending:{path:'episode-checkins',body:{episode_id:current.id,command:crypto.randomUUID()}}});
@@ -139,6 +152,12 @@ window.AutofeverBridge = (() => {
         return;
       }
       if(name === 'hide-update') {composing = false; return;}
+      if(name === 'save-recovery-draft') {
+        await save({...state,recoveryDraft:structuredClone(recoveryDraft)});
+        ctx.say('Herstelconcept versleuteld op dit apparaat bewaard. Niets verstuurd.');
+        return;
+      }
+      if(name === 'hide-recovery') {composingRecovery = false; return;}
       if (name === 'activate') {
         const saved = await ctx.request(ctx.db.transaction('vault').objectStore('vault').get('data'));
         if ((saved?.revision || 0) !== ctx.getRevision()) throw {code:'STALE'};
@@ -148,11 +167,15 @@ window.AutofeverBridge = (() => {
         const contacts = profile.recipients.map(id => data.contacts.find(c => c.id === id));
         preparationCheck(profile, contacts);
         await save({...state,pending:{path:'episodes',body:{command:crypto.randomUUID(),profile,contacts,link_ttl:state.hours * 3600}}});
-      } else if (name === 'recover' || name === 'cancel') {
+      } else if (name === 'submit-recovery' || name === 'cancel') {
         if (!current || current.state !== 'active') throw {userMessage:'Haal eerst de actuele actieve melding op.'};
-        const recovery = current.snapshot.preparation?.profile.recovery;
-        if (name === 'recover' && !recovery) throw {userMessage:'Deze melding heeft geen opgeslagen hersteltekst.'};
-        await save({...state,pending:{path:'episode-closures',body:{episode_id:current.id,state:name === 'recover'?'recovered':'cancelled',recovery_message:name === 'recover'?recovery:null}}});
+        if (name === 'submit-recovery') {
+          const draft = structuredClone(recoveryDraft || {});
+          if(draft.episode_id !== current.id || !draft.message?.trim() || !draft.recipients?.length) throw {userMessage:'Schrijf een herstelbericht en selecteer minstens één ontvanger.'};
+          await save({...state,recoveryDraft:draft,pending:{path:'episode-closures',body:{episode_id:current.id,state:'recovered',recovery_message:draft.message.trim(),recovery_recipients:draft.recipients}}});
+        } else {
+          await save({...state,pending:{path:'episode-closures',body:{episode_id:current.id,state:'cancelled',recovery_message:null,recovery_recipients:[]}}});
+        }
       }
       await submitPending();
     });
@@ -173,6 +196,15 @@ window.AutofeverBridge = (() => {
     if (current) {
       const snap = current.snapshot, prepared = snap.preparation;
       const person = id => prepared?.contacts.find(c => c.id === id)?.name || id;
+      if(composingRecovery && current.state === 'active' && !state.pending) {
+        const eligible = snap.recipients.filter(r => current.notifications.some(j => j.recipient === r.id && j.kind === 'illness' && j.status === 'accepted'));
+        recoveryDraft = recoveryDraft?.episode_id === current.id ? recoveryDraft : {episode_id:current.id,message:prepared?.profile.recovery || '',recipients:eligible.map(r=>r.id)};
+        html += '<section class="editor-block"><h2>Herstelbericht</h2><p class="hint">Pas tekst en ontvangers aan voordat je de herstelmelding in de wachtrij zet. Kies alleen mensen van wie de oorspronkelijke ziekmelding door de bezorgdienst is aangenomen. Dat is geen bewijs van bezorging of lezen.</p>';
+        html += '<form id="owner-recovery"><label for="owner-recovery-message">Bericht bij herstel</label><textarea id="owner-recovery-message" name="message" maxlength="10000" required>'+escape(recoveryDraft.message)+'</textarea><fieldset><legend>Ontvangers van het herstelbericht</legend>';
+        for(const r of eligible) html += '<label class="check"><input type="checkbox" name="recipient" value="'+escape(r.id)+'"'+(recoveryDraft.recipients.includes(r.id)?' checked':'')+'><span>'+escape(person(r.id))+'</span></label>';
+        if(!eligible.length) html += '<p>Geen ontvangers beschikbaar: geen oorspronkelijke ziekmelding is door een bezorgdienst aangenomen.</p>';
+        html += '</fieldset><p class="hint">De herstelmelding sluit deze ziekmelding. Er wordt niets naar andere personen gestuurd.</p><div class="actions"><button class="primary" type="submit"'+(!eligible.length?' disabled':'')+'>Herstelbericht in wachtrij zetten</button>'+button('Concept bewaren','save-recovery-draft')+button('Editor sluiten','hide-recovery','text-button')+'</div></form></section>';
+      }
       html += '<h2>'+escape(prepared?.profile.name || 'Ziekmelding')+'</h2><p class="intro">'+({active:'Actief op de server.',recovered:'Herstel vastgelegd op de server.',cancelled:'Geannuleerd op de server.'}[current.state])+'</p>';
       if(composing && current.state === 'active' && !state.pending) {
         const eligible = snap.recipients.filter(r => current.notifications.some(j => j.recipient === r.id && j.kind === 'illness' && j.status === 'accepted'));
@@ -193,6 +225,7 @@ window.AutofeverBridge = (() => {
         for(const job of current.notifications.filter(j => j.recipient === recipient.id)) html += '<p class="hint">'+(job.kind === 'recovery'?'Herstel':job.kind === 'update'?'Update '+(++updateNumber):'Ziekmelding')+' · '+escape(labels[job.status] || 'Onbekende status')+'</p>';
         html += '<p class="hint">'+(current.recipients.find(r => r.id===recipient.id)?.acknowledged?'Lezen expliciet bevestigd':'Lezen niet bevestigd')+'</p></section>';
       }
+      if(current.recovery) html += '<h2 class="section-gap">Bericht bij herstel</h2><section class="editor-block"><p class="long">'+escape(current.recovery.message)+'</p><p class="hint">Ontvangers: '+escape(current.recovery.recipients.map(person).join(', '))+'</p></section>';
       html += '<h2 class="section-gap">Hulp</h2>';
       if (!snap.tasks.length) html += '<p>Geen hulpvragen ingesteld.</p>';
       for(const task of snap.tasks) {
@@ -253,8 +286,16 @@ window.AutofeverBridge = (() => {
       updateDraft = {episode_id:current.id,message:String(fields.get('message')||''),recipients:fields.getAll('recipient')};
     }
   };
+  const captureRecovery = event => {
+    if(event.target.closest('#owner-recovery') && current) {
+      const fields = new FormData(document.getElementById('owner-recovery'));
+      recoveryDraft = {episode_id:current.id,message:String(fields.get('message')||''),recipients:fields.getAll('recipient')};
+    }
+  };
   document.addEventListener('input',captureUpdate);
   document.addEventListener('change',captureUpdate);
+  document.addEventListener('input',captureRecovery);
+  document.addEventListener('change',captureRecovery);
   document.addEventListener('submit', event => {
     if(event.target.id === 'owner-retention' && ctx) {
       event.preventDefault(); event.stopImmediatePropagation();
@@ -284,6 +325,12 @@ window.AutofeverBridge = (() => {
         current=null;
         ctx.say('Serverhistorie gewist. Je lokale profielen en serverkoppeling zijn behouden.');
       });
+      return;
+    }
+    if(event.target.id === 'owner-recovery' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      captureRecovery({target:event.target});
+      action('submit-recovery');
       return;
     }
     if(event.target.id === 'owner-update' && ctx) {

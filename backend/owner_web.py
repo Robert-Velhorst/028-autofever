@@ -83,12 +83,16 @@ class OwnerApp(RecipientApp):
             self.store.confirm_checkin(token, value['episode_id'], value['command'])
             result = self.store.episode(token, value['episode_id'])
         else:
-            if not isinstance(value, dict) or set(value) != {'episode_id', 'state', 'recovery_message'}:
+            required = {'episode_id', 'state', 'recovery_message'}
+            if not isinstance(value, dict) or set(value) not in (required, required | {'recovery_recipients'}):
                 raise RequestError(400)
             if not isinstance(value['episode_id'], str):
                 raise RequestError(400)
             if value['state'] == 'cancelled' and value['recovery_message'] is not None:
                 raise RequestError(400)
-            self.store.close(token, value['episode_id'], value['state'], value['recovery_message'])
+            recovery_recipients = value.get('recovery_recipients')
+            if value['state'] == 'cancelled' and recovery_recipients not in (None, []):
+                raise RequestError(400)
+            self.store.close(token, value['episode_id'], value['state'], value['recovery_message'], recovery_recipients)
             result = self.store.episode(token, value['episode_id'])
         return json.dumps({'data': result}, ensure_ascii=False).encode(), 'application/json; charset=utf-8'

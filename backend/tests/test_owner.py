@@ -220,14 +220,31 @@ class OwnerTests(unittest.TestCase):
     def test_recovery_targets_accepted_only_and_closure_is_repeatable(self):
         episode = json.loads(self.activate()['body'])['data']
         self.store.dispatch_one(lambda item: 'synthetic-only')
-        closure = {'episode_id': episode['id'], 'state': 'recovered', 'recovery_message': saved_profile()['recovery']}
+        closure = {'episode_id': episode['id'], 'state': 'recovered', 'recovery_message': 'Beter, dank je. Tot snel.',
+                   'recovery_recipients': ['alice']}
         wrong_owner = self.request('/api/v1/owner/episode-closures', 'POST', closure, token=self.other)
         self.assertEqual(wrong_owner['status'], 404)
+        rejected = self.request('/api/v1/owner/episode-closures', 'POST',
+                                {**closure, 'recovery_recipients': ['bob']})
+        self.assertEqual(rejected['status'], 409)
+        self.assertEqual(self.request('/api/v1/owner/episode-closures', 'POST',
+                                      {**closure, 'recovery_recipients': ['alice', 'alice']})['status'], 400)
+        self.assertEqual(self.request('/api/v1/owner/episode-closures', 'POST',
+                                      {**closure, 'recovery_recipients': [['alice']]})['status'], 400)
+        self.assertEqual(self.store.latest_episode(self.owner)['state'], 'active')
         first = self.request('/api/v1/owner/episode-closures', 'POST', closure)
         self.assertEqual(first['status'], 200)
         self.assertEqual(first, self.request('/api/v1/owner/episode-closures', 'POST', closure))
-        jobs = json.loads(first['body'])['data']['notifications']
+        first_data = json.loads(first['body'])['data']
+        self.assertEqual(first_data['recovery'], {'message': closure['recovery_message'], 'recipients': ['alice']})
+        jobs = first_data['notifications']
         self.assertEqual([(j['recipient'], j['status']) for j in jobs if j['kind']=='recovery'], [('alice','queued')])
+        exported = self.store.export_owner(self.owner)['episodes'][0]
+        self.assertEqual(exported['recovery'], first_data['recovery'])
+        sent = []
+        self.store.dispatch_one(lambda item: sent.append(item) or 'recovery-accepted')
+        self.assertEqual(sent[0]['recipient_id'], 'alice')
+        self.assertEqual(sent[0]['message'], 'Beter, dank je. Tot snel.')
 
     def test_incomplete_multichannel_and_unknown_fields_do_not_start(self):
         for mutation in [lambda p,c: c[0].update(channels=['Email','SMS']),
