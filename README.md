@@ -1,10 +1,14 @@
 # AutoFever
 
-AutoFever is a low-friction illness-notification application. It allows a user to notify predefined people and connected absence systems when they are temporarily unable to meet work, school, study, caregiving, or other obligations.
+AutoFever is an illness-notification and practical-help application in development. Its purpose is to notify the people who need to know when sudden, temporary illness makes communication difficult, and tell them what they can do to help. Authorized absence-system integrations are a further intended capability, not a current connection.
+
+The name is a wordplay: **auto** means automatic, and **fever** represents sudden temporary illness more broadly—not only a high temperature. This project has nothing to do with cars or RDW vehicle data.
 
 The original idea is intentionally simple: configure the relevant recipients and practical help in advance, then use one prominent action when illness makes ordinary communication difficult. The completed service is intended to send an appropriate absence message, organize optional help, record actual delivery status, and later send a recovery notification. The current preview does not send messages.
 
 > **Project status — 13 October 2026:** a runnable mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts, profiles, drafts, help preferences, encrypted backup/restore and accessibility settings work locally. The optional local `/owner` mode now connects that editor to the backend: one-press activation, real queue/help status, recovery and cancellation. The separate `/help` page records recipient responses. Actual provider delivery, scheduled reminders and production hosting are not connected. This is not a production-ready notification service.
+
+An initial [SMTP email adapter and queue worker](backend/smtp.md) are also implemented: encrypted connections, private per-recipient messages, recovery messages and explicit handling of failed or uncertain submissions. They have been tested with temporary local mailservers only. There is no configured real mail account, public recipient site or external delivery proof. Running the preview does not start the worker or send messages.
 
 The new [backend service and web interfaces](backend/README.md) implement persistent illness episodes, an encrypted outgoing queue, scoped recipient links and task responses. The local `/help` page lets a recipient explicitly acknowledge, accept, decline or complete assigned help without an account. The opt-in [owner connection](backend/owner-api.md) starts the saved profile rather than an unsaved draft and shows authoritative helper/queue status. Lost activation or recovery responses can be reconciled without starting a duplicate episode. This has automated service/HTTP tests and local Chromium interaction evidence with synthetic data; no real provider is connected. The historical Flask routes below are not this new service's API; its contract is in [OpenAPI](backend/openapi.yaml).
 
@@ -219,6 +223,8 @@ A production implementation should separate the following components:
 - workplace or education systems with official integration support.
 
 Adapters must use documented APIs or user-controlled device actions. AutoFever must not depend on credential scraping, fragile browser automation, or unauthorized access to institutional systems.
+
+Current implementation: [SMTP email](backend/smtp.md) uses the existing encrypted backend queue, requires explicit configuration and an approved recipient list, and submits only when the worker is started with `--send`. The non-sending `--check` validates local settings only. Other channel adapters, provider callbacks and production delivery verification remain open. A mailserver accepting an email is not proof that it reached an inbox or was read.
 
 ### Optional backend
 

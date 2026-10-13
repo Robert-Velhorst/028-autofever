@@ -377,7 +377,7 @@ class Store:
         with self.transaction() as db:
             db.execute("UPDATE jobs SET status='uncertain' WHERE status='sending' AND lease<=?", (int(self.clock()),))
 
-    def dispatch_one(self, sender):
+    def dispatch_one(self, sender, *, channels=None):
         """Call a trusted configured adapter once. Acceptance is not delivery.
 
         An adapter returns a nonempty receipt only on positive provider acceptance.
@@ -385,15 +385,22 @@ class Store:
         """
         if not callable(sender):
             raise Invalid('No sender configured')
+        if channels is not None and (not isinstance(channels, (tuple, list)) or not channels or
+                                     any(channel not in ('email', 'sms', 'whatsapp', 'push') for channel in channels)):
+            raise Invalid('Invalid sender channel scope')
         now = int(self.clock())
         with self.transaction() as db:
             db.execute("UPDATE jobs SET status='uncertain' WHERE status='sending' AND lease<=?", (now,))
             db.execute("UPDATE jobs SET status='failed' WHERE status='queued' AND kind='illness' AND EXISTS "
                        '(SELECT 1 FROM recipients r WHERE r.episode=jobs.episode AND r.recipient=jobs.recipient AND r.expires<=?)', (now,))
-            row = db.execute("SELECT * FROM jobs WHERE status='queued' AND due<=? ORDER BY rowid LIMIT 1", (now,)).fetchone()
+            row, payload = None, None
+            for candidate in db.execute("SELECT * FROM jobs WHERE status='queued' AND due<=? ORDER BY rowid", (now,)):
+                item = self.open(candidate['id'], candidate['payload'])
+                if channels is None or item['channel'] in channels:
+                    row, payload = candidate, item
+                    break
             if row is None:
                 return False
-            payload = self.open(row['id'], row['payload'])
             attempts = row['attempts'] + 1
             db.execute("UPDATE jobs SET status='sending',attempts=?,lease=? WHERE id=?", (attempts, now + 300, row['id']))
         receipt, outcome = None, 'accepted'

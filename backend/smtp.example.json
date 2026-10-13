@@ -1,0 +1,9 @@
+{
+  "host": "smtp.example.invalid",
+  "port": 465,
+  "security": "implicit_tls",
+  "username": "dedicated-autofever-account",
+  "from_address": "autofever@example.invalid",
+  "help_origin": "https://autofever.example.invalid",
+  "allowed_recipients": ["approved-recipient@example.invalid"]
+}
