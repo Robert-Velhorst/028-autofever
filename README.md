@@ -319,115 +319,42 @@ The current Python prototype sketches the following Flask routes:
 
 These routes document prototype intent only. They are not a stable or secured public API.
 
-## Current Repository State
+## Repository structure and supported paths
 
-The repository contains two separate development artifacts: a runnable browser preview and incomplete historical Python code. Neither is the completed online service.
+The maintained implementation is split into a static, mobile-first browser app and an optional Python service. They deliberately have different data and delivery capabilities:
 
-### Current mobile preview
+- `illness-preview/` contains the profile editor, local encrypted vault, encrypted export/import, contact review, and the standalone local-only flow. See its [user-facing guide](illness-preview/README.md) and [browser verification record](illness-preview/VERIFICATION.md).
+- `backend/` contains the persistent service, SQLite data model and migrations, versioned HTTP API, owner and recipient interfaces, protected help responses, encrypted queue, SMTP adapter/worker, private provisioning and access tools, backup/restore, and owner data controls. See [backend documentation](backend/README.md), [OpenAPI contract](backend/openapi.yaml), and [privacy and security boundaries](backend/owner-api.md).
+- `deploy/` contains isolated web/worker service templates and reverse-proxy guidance for a future separate `028-autofever` deployment on the existing `013-hire-ai` server. It is preparation, not a live installation. The guide records exact acceptance gates and [current verification](deploy/README.md).
+- `app_enhanced_optimized_fixed.py`, `code_review_findings.md`, and `code_fixes_report.md` are historical prototype/review artifacts. The Python file imports modules absent from this repository; it is not the maintained service and its old claims are not current test evidence.
 
-- `illness-preview/index.html`: Dutch mobile-first interface, local encrypted storage and backup/restore.
-- `illness-preview/tests/`: seven browser suites and the test-runner contract checks.
-- `illness-preview/verify.ps1`: pinned Playwright CLI runner using isolated synthetic test contexts.
-- `illness-preview/README.md` and `VERIFICATION.md`: actual functionality, execution instructions and remaining gates.
+The standalone browser app does not send notifications. The optional owner connection uses the backend for persistent episodes and status. Email sending is implemented and tested against local synthetic SMTP servers, but no real provider/account is configured. Check-ins are owner-only and appear in Autofever when opened or refreshed; no helper or background notification is generated. Configured recurrence and backup helpers are not automated. These distinctions are intentional and also described in the detailed component guides.
 
-Profile editing, vCard contact import/review, per-person messages, separate drafts, helper timing/repeat/backup preferences, active snapshots, local updates/recovery and large-text/high-contrast preferences are implemented here. Importing a contact leaves delivery channels empty and does not add it to a profile. Choosing a channel, repetition or reserve helper does not execute it. When served with the optional owner connection, the same editor uses server episodes and can fetch actual recipient acknowledgments and help acceptance/completion. Owner check-ins are calculated from the saved interval and episode status, persisted on the server, and shown only when the owner opens or refreshes Autofever; they do not automatically contact anyone. The standalone preview remains local-only. Recurrence, background reminders and reserve-helper preferences survive activation but are not automated; multiple initial channels and Push are rejected until their delivery rules are implemented.
+## Running and verifying
 
-The correct preview was copied as source files only onto the current clean Git history. The rejected automotive implementation and old Git history are not part of this integration.
+For the browser-only preview, start Python's static server from the repository root and bind it to loopback:
 
-### AutoFever material
+```powershell
+python -m http.server 8000 --bind 127.0.0.1 --directory illness-preview
+```
 
-- `app_enhanced_optimized_fixed.py` sketches the main application, Flask endpoints, illness and recovery flows, offline behavior, accessibility, personalization, feedback, and resource optimization.
-- `code_review_findings.md` records issues found during an earlier review.
-- `code_fixes_report.md` describes intended fixes and optimizations.
+Open `http://localhost:8000/`. To run its eight isolated Chromium suites, Node.js/npm and Chromium are needed:
 
-The main AutoFever file imports `models` and `services` modules that are not present in this repository. Templates, dependency metadata, packaging, migrations, and a runnable test suite are also absent. The prototype therefore cannot currently be installed and run from this checkout alone.
+```powershell
+./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
+```
 
-### Validation caution
+For the service, use Python 3.11+, create an isolated virtual environment and install `backend/requirements.txt`; then run the commands in [backend test instructions](backend/README.md#run-the-tests). The documented test suite uses synthetic data and local-only services. The hosted entry point refuses implicit serving and exposes only a loopback listener behind its configured proxy. See [deployment preparation](deploy/README.md) before attempting any hosted setup.
 
-The existing fix report says that tests passed in an earlier environment, but the corresponding complete source tree and test suite are not present here. Those claims cannot be independently reproduced from the current repository.
+The current GitHub Actions workflow has passed 180 backend tests on Linux and all eight browser suites on Windows for the documented checkpoint. This validates local/synthetic behavior only. It is not evidence of production deployment, public HTTPS, provider delivery or physical-device acceptance.
 
-## Running the Project
+## Release readiness and remaining work
 
-Use [Try the Mobile Preview](#try-the-mobile-preview) for the supported local browser preview. There is no supported complete-service installation yet. Do not treat the standalone Python files as a production deployment.
+The private owner/helper workflows, explicit recovery and cancellation, idempotent queue operations, local SMTP transport, owner check-ins, encrypted exports, live-record deletion and browser-vault clearing are implemented and covered by automated/local verification as detailed above. They do **not** make the service ready for public users.
 
-Before adding run instructions, the repository needs:
+The remaining release gates include: authenticated read-only inventory of the existing `013-hire-ai` host; a dedicated domain and approved routing; qualification of the current release and service isolation on that host; verified backup and recovery operations; physical-phone and public HTTPS acceptance; approved real email provider/sender configuration and a controlled delivery test; nontechnical owner credential recovery/onboarding; off-host backup scheduling and key-recovery procedures; and a fresh isolated-container verification for the current commit. No Hire.ai database, key, service, proxy configuration or firewall is to be repurposed for Autofever.
 
-1. restoration of all required AutoFever modules and templates;
-2. a dependency and lock file;
-3. environment-variable documentation;
-4. database and migration setup where required;
-5. automated tests;
-6. a reproducible local development command;
-7. a production security review.
-
-## Minimum Viable Product
-
-The first credible release should contain:
-
-- guided setup for identity, contacts, groups, and templates;
-- one prominent illness action;
-- optional duration, return date, and custom note;
-- recipient and disclosure review during setup, with immediate activation of the saved plan;
-- at least one reliable delivery adapter;
-- encrypted local configuration;
-- offline queue and duplicate-send prevention;
-- delivery and failure status;
-- explicit recovery notification;
-- accessible mobile-first interface;
-- complete deletion and export controls;
-- no diagnostic or automated health inference.
-
-Formal attendance-system integration should be introduced only after the core notification flow is reliable and an institution offers an authorized integration method.
-
-## Acceptance Criteria
-
-A release is not ready until:
-
-1. no notification can be sent without an explicit, reviewable user action;
-2. the saved-plan preview accurately lists every recipient, channel, and disclosed field, and one-press activation uses that saved snapshot without an extra confirmation;
-3. queued retries cannot produce duplicate messages;
-4. offline and restart recovery are tested;
-5. delivery, acknowledgment, and formal absence acceptance remain distinct states;
-6. illness mode and recovery mode form a consistent state machine;
-7. accessibility flows work without a mouse and with a screen reader;
-8. secrets and provider credentials are never committed to the repository;
-9. health and contact data can be exported and deleted;
-10. automated tests cover recipient resolution, template rendering, consent, retries, and adapter failures;
-11. security and privacy documentation reflects the actual implementation;
-12. the repository can be installed and run from documented steps in a clean environment.
-
-## Roadmap
-
-### Phase 1 — Repository recovery
-
-- preserve the clean repository history and the separately runnable illness preview;
-- retain historical Python material without claiming its missing modules work;
-- establish reproducible backend and integration tests alongside the existing browser suites.
-
-### Hosting decision
-
-Deploy `028-autofever` as a separate application on the existing Hetzner server named `013-hire-ai`. Preserve that server name and Hire.ai's installation and data. Autofever needs separate configuration, secrets, storage and lifecycle management. Do not provision a separate server or purchase a capacity upgrade without the owner's approval.
-
-Autofever has not been deployed by this integration. Authenticated host inspection, measured shared-host capacity, HTTPS/domain configuration, a real notification provider and recovery acceptance remain open. Publishing source files is not deployment.
-
-### Phase 2 — Private MVP
-
-- implement the one-action illness and recovery flows;
-- deliver through one reliable channel;
-- validate usability, consent, offline behavior, and accessibility.
-
-### Phase 3 — Integrations
-
-- add channel adapters;
-- add authorized calendar, workplace, school, and attendance integrations;
-- normalize provider callbacks and delivery evidence.
-
-### Phase 4 — Wider release
-
-- complete privacy and security assessment;
-- localize templates and onboarding;
-- validate platform-store requirements;
-- conduct controlled user testing before public availability.
+Formal workplace, school, calendar or attendance integrations are future capabilities only. They require a real authorized integration path and must not be simulated. The app does not diagnose illness, infer health state, recommend treatment, decide work/school fitness or guarantee formal acceptance of an absence.
 
 ## Non-Goals
 
