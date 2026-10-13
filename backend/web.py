@@ -29,7 +29,7 @@ ERRORS = {
     403: ('forbidden', 'Verzoek niet toegestaan.'),
     404: ('unavailable', 'Deze link is niet beschikbaar.'),
     405: ('method_not_allowed', 'Methode niet toegestaan.'),
-    409: ('conflict', 'Deze taak is intussen gewijzigd. Vernieuw de gegevens.'),
+    409: ('conflict', 'De gegevens zijn intussen gewijzigd. Haal de actuele stand op.'),
     413: ('too_large', 'Verzoek te groot.'),
     415: ('unsupported_media_type', 'JSON vereist.'),
     503: ('temporarily_unavailable', 'Tijdelijk niet beschikbaar. Probeer later opnieuw.'),
@@ -57,6 +57,9 @@ class RecipientApp:
                 not parsed.port or origin != f'http://127.0.0.1:{parsed.port}'):
             raise ValueError('This local transport requires an exact IPv4 loopback origin with port')
         self.store, self.origin, self.host = store, origin, parsed.netloc
+        self.routes = dict(ROUTES)
+        self.csp = ("default-src 'none'; script-src 'self'; style-src 'self'; "
+                    "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
         root = Path(__file__).parent / 'static'
         self.assets = {route: ((root / name).read_bytes(), mime) for route, (name, mime) in ASSETS.items()}
 
@@ -81,7 +84,7 @@ class RecipientApp:
             body = json.dumps({'error': {'code': code, 'message': message}}, ensure_ascii=False).encode()
             mime = 'application/json; charset=utf-8'
             if status == 405:
-                extra.append(('Allow', ROUTES.get(env.get('PATH_INFO'), 'GET')))
+                extra.append(('Allow', self.routes.get(env.get('PATH_INFO'), 'GET')))
             if status == 503:
                 extra.append(('Retry-After', '5'))
         headers = [
@@ -90,8 +93,7 @@ class RecipientApp:
             ('X-Content-Type-Options', 'nosniff'), ('X-Frame-Options', 'DENY'),
             ('Cross-Origin-Resource-Policy', 'same-origin'),
             ('Permissions-Policy', 'camera=(), microphone=(), geolocation=()'),
-            ('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; "
-             "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            ('Content-Security-Policy', self.policy(env.get('PATH_INFO'))),
         ]
         start_response(f'{status} {HTTPStatus(status).phrase}', headers + extra)
         return [body]
@@ -110,7 +112,7 @@ class RecipientApp:
             raise RequestError(403)
         if env.get('QUERY_STRING'):
             raise RequestError(400)
-        expected = 'GET' if path in self.assets else ROUTES.get(path)
+        expected = 'GET' if path in self.assets else self.routes.get(path)
         if not expected:
             raise RequestError(404)
         if method != expected:
@@ -121,6 +123,7 @@ class RecipientApp:
         if not re.fullmatch(r'Bearer [A-Za-z0-9_-]{43}', bearer):
             raise Denied()
         token = bearer[7:]
+        value = None
         if method == 'POST':
             if origin != self.origin:
                 raise RequestError(403)
@@ -130,7 +133,7 @@ class RecipientApp:
             if not re.fullmatch(r'[0-9]{1,10}', length) or env.get('HTTP_TRANSFER_ENCODING'):
                 raise RequestError(400)
             length = int(length)
-            if length > 8192:
+            if length > self.body_limit(path):
                 raise RequestError(413)
             raw = env['wsgi.input'].read(length)
             if len(raw) != length:
@@ -139,6 +142,16 @@ class RecipientApp:
                 value = json.loads(raw.decode('utf-8'), object_pairs_hook=unique_object)
             except (ValueError, RecursionError):
                 raise RequestError(400) from None
+        return self.api(path, method, token, value)
+
+    def policy(self, path):
+        return self.csp
+
+    def body_limit(self, path):
+        return 8192
+
+    def api(self, path, method, token, value):
+        if method == 'POST':
             if path.endswith('/acknowledgment'):
                 if value != {}:
                     raise RequestError(400)

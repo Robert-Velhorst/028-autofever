@@ -55,6 +55,7 @@
     for (const task of data.tasks) {
       const article = node('article', '', 'task');
       article.append(node('h3', task.title), node('p', task.timing));
+      if (task.description) article.append(node('p', task.description));
       let label = 'Nog beschikbaar';
       if (task.status === 'pending' && task.declined_by_you) label = 'Je hebt aangegeven dat dit niet lukt.';
       if (task.status === 'accepted') label = task.claimed_by_you ? 'Jij pakt dit op.' : 'Iemand anders pakt dit op.';

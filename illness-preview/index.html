@@ -56,6 +56,7 @@ const seed={version:1,owner:'Robert',defaultId:'ill',contacts:[{id:'maya',name:'
 let data,db,key,draft=null,contactDraft=null,view='home',busy=false,ready=false,revision=0;
 let concepts={},conceptQueue=Promise.resolve(),conceptPending=0,conceptError=null,editorKey=null;
 let restoreCandidate=null;
+const online=window.AutofeverBridge||null;
 const repeats={once:'Eenmalig',daily:'Dagelijks',weekly:'Wekelijks'};
 async function seal(value){const iv=crypto.getRandomValues(new Uint8Array(12));return {iv,body:await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(value)))};}
 async function unseal(value){return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:value.iv},key,value.body)));}
@@ -70,6 +71,7 @@ async function openStore(){
  else data=clone(seed);
  const storedConcepts=await request(db.transaction('vault').objectStore('vault').get('concepts'));
  if(storedConcepts)concepts=await unseal(storedConcepts);
+ if(online)await online.init({db,seal,unseal,request,checkedWrite,esc,render,say,focusHeading,getData:()=>data,getRevision:()=>revision});
  ready=true;render();focusHeading();
 }
 function writeItems(items){return new Promise((resolve,reject)=>{const tx=db.transaction('vault','readwrite');for(const [id,value]of Object.entries(items))tx.objectStore('vault').put(value,id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Opslaan afgebroken'));});}
@@ -126,6 +128,7 @@ function render(){
  document.querySelectorAll('nav button').forEach(b=>b.dataset.go===navView?b.setAttribute('aria-current','page'):b.removeAttribute('aria-current'));
  $('.avatar').textContent=data.owner[0]||'R';
  const p=selectedProfile();
+ if(online?.renderHome(view))return;
  if(view==='home'&&!data.event){
  const issues=readiness(p);
  $('#main').innerHTML='<h1>Neem de rust<br> die je nodig hebt.</h1><p class="intro">Laat je mensen weten hoe het gaat. Met één druk op de knop.</p><button class="activate" type="button" data-action="activate"'+(!p?' disabled':'')+'>'+icon('heart')+'<strong>Ik ben ziek</strong><span>Start je ingestelde plan in de preview.</span></button><button type="button" class="profile-link" data-action="profiles"><span>Profiel: <strong>'+esc(p?.name||'Maak eerst een profiel')+'</strong></span><span>Wijzigen '+icon('arrow')+'</span></button><section class="circle"><h2>Jouw mensen · '+(p?.recipients.length||0)+' ontvangers</h2><p>'+esc(p?names(p.recipients)||'Selecteer ontvangers in je profiel.':'')+'</p></section><section class="readiness" aria-label="Gereedheidscontrole"><h2>'+ (issues.length?'Ontbrekende gegevens':'Je profiel is ingevuld')+'</h2>'+(issues.length?'<ul>'+issues.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'+button('Gegevens aanvullen','people','text-button'):'<p>Ontvangers en hulptaken zijn ingesteld.</p>')+'<p class="hint">Berichtbezorging is nog niet aangesloten. Je kunt de preview proberen; niemand ontvangt een bericht.</p></section>'; }
@@ -147,6 +150,7 @@ function render(){
  $('#main').innerHTML='<div class="success-mark">'+icon('check')+'</div><h1>Fijn dat je<br>weer opknapt.</h1><p class="intro">Je herstelbericht voor de ontvangers:</p><p class="long recovery-text">'+esc(lastRecovery)+'</p><p class="hint">Preview afgesloten. Geen bericht verstuurd.</p><div class="actions">'+button('Terug naar thuis','home','primary')+'</div>';
  }
  editorLayout();
+ online?.decorate(view);
 }
 function input(id,label,value,type='text',required=false,max=200){return '<label for="'+id+'">'+label+'</label><input id="'+id+'" name="'+id+'" type="'+type+'" value="'+esc(value)+'"'+(required?' required':'')+' maxlength="'+max+'">';}
 function area(id,label,value,required=false){return '<label for="'+id+'">'+label+'</label><textarea id="'+id+'" name="'+id+'" maxlength="2000"'+(required?' required':'')+'>'+esc(value)+'</textarea>';}
@@ -223,6 +227,7 @@ function failForm(message){const el=$('#form-error');el.textContent=message;el.t
 let lastRecovery='';
 async function action(a,id){
  if(!ready||busy)return;
+ if(online?.handles(a)){busy=true;try{await online.action(a);}finally{busy=false;}return;}
  if(a==='large-text'||a==='high-contrast'){busy=true;try{const next=clone(data);next.preferences={largeText:data.preferences?.largeText===true,highContrast:data.preferences?.highContrast===true};const field=a==='large-text'?'largeText':'highContrast';next.preferences[field]=!next.preferences[field];await commit(next);applyAppearance();document.querySelector('[data-action="'+a+'"]').setAttribute('aria-pressed',String(next.preferences[field]));say('Leesvoorkeur opgeslagen.');}finally{busy=false;}return;}
  if(['home','profiles','people','update','settings'].includes(a)){restoreCandidate=null;await move(a);return;}
  if(a==='restore-backup'){if(!restoreCandidate)return;if(!confirm('Huidige opgeslagen gegevens en concepten vervangen door deze back-up? Download eerst een back-up als je ze wilt bewaren. Er wordt niets verstuurd.'))return;busy=true;try{await conceptQueue;const candidate=restoreCandidate,oldConcepts=await request(db.transaction('vault').objectStore('vault').get('concepts'));const sealedData=await seal(candidate.data),sealedConcepts=await seal(candidate.concepts);await checkedWrite({data:sealedData,concepts:sealedConcepts},{data:revision,concepts:oldConcepts?.revision||0});revision++;data=candidate.data;concepts=candidate.concepts;restoreCandidate=null;await move('settings');say('Back-up teruggezet op deze browser.');}finally{busy=false;}return;}

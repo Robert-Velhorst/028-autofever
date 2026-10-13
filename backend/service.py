@@ -19,6 +19,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from backend.profile import compile_profile
 
 
 class Invalid(ValueError):
@@ -65,8 +66,17 @@ def text(value, maximum, *, identifier=False):
 
 
 def snapshot(value):
-    if not isinstance(value, dict) or set(value) != {'recipients', 'tasks'}:
+    if not isinstance(value, dict) or set(value) not in ({'recipients', 'tasks'}, {'recipients', 'tasks', 'preparation'}):
         raise Invalid('Expected recipients and tasks')
+    if 'preparation' in value:
+        try:
+            prepared = value['preparation']
+            if not isinstance(prepared, dict) or set(prepared) != {'profile', 'contacts'}:
+                raise ValueError('Invalid preparation')
+            if compile_profile(prepared['profile'], prepared['contacts']) != value:
+                raise ValueError('Snapshot differs from saved profile')
+        except ValueError as error:
+            raise Invalid('Invalid saved profile') from error
     recipients, tasks = value['recipients'], value['tasks']
     if not isinstance(recipients, list) or not 1 <= len(recipients) <= 100:
         raise Invalid('Expected 1 to 100 recipients')
@@ -92,7 +102,7 @@ def snapshot(value):
         text(item['message'], 10000)
     task_ids = set()
     for task in tasks:
-        if not isinstance(task, dict) or set(task) != {'id', 'title', 'timing', 'assignees'}:
+        if not isinstance(task, dict) or set(task) not in ({'id', 'title', 'timing', 'assignees'}, {'id', 'title', 'description', 'timing', 'assignees'}):
             raise Invalid('Invalid task fields')
         tid = text(task['id'], 80, identifier=True)
         if tid in task_ids:
@@ -100,6 +110,8 @@ def snapshot(value):
         task_ids.add(tid)
         text(task['title'], 1000)
         text(task['timing'], 1000)
+        if 'description' in task and (not isinstance(task['description'], str) or len(task['description']) > 2000 or '\x00' in task['description']):
+            raise Invalid('Invalid task description')
         helpers = task['assignees']
         if (not isinstance(helpers, list) or not helpers or
                 any(not isinstance(x, str) for x in helpers) or
@@ -260,7 +272,26 @@ class Store:
         with self.transaction() as db:
             row = self._episode(db, owner_token, eid)
             jobs = db.execute('SELECT id,recipient,kind,status,attempts FROM jobs WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
-            return {'id': eid, 'state': row['state'], 'notifications': [dict(x) for x in jobs]}
+            recipients = db.execute('SELECT recipient,acknowledged FROM recipients WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
+            tasks = db.execute('SELECT id,state,claimant FROM tasks WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
+            declines = db.execute('SELECT task,recipient FROM declines WHERE episode=?', (eid,)).fetchall()
+            return {'id': eid, 'state': row['state'], 'notifications': [dict(x) for x in jobs],
+                    'snapshot': self.open(eid, row['data']),
+                    'recipients': [{'id': r['recipient'], 'acknowledged': bool(r['acknowledged'])} for r in recipients],
+                    'tasks': [{**dict(t), 'declined_by': [d['recipient'] for d in declines if d['task'] == t['id']]} for t in tasks]}
+
+    def latest_episode(self, owner_token):
+        with self.transaction() as db:
+            owner = self._owner(db, owner_token)
+            row = db.execute('SELECT id FROM episodes WHERE owner=? ORDER BY created DESC,rowid DESC LIMIT 1', (owner,)).fetchone()
+        return self.episode(owner_token, row['id']) if row else None
+
+    def activate_profile(self, owner_token, command, profile, contacts, *, link_ttl):
+        try:
+            value = compile_profile(profile, contacts)
+        except ValueError as error:
+            raise Invalid('Invalid saved profile') from error
+        return self.activate(owner_token, command, value, link_ttl=link_ttl)
 
     def _capability(self, db, token):
         row = db.execute("SELECT r.*, e.data FROM recipients r JOIN episodes e ON e.id=r.episode "
@@ -281,6 +312,7 @@ class Store:
                 declined = db.execute('SELECT 1 FROM declines WHERE episode=? AND task=? AND recipient=?',
                                       (row['episode'], task['id'], row['recipient'])).fetchone()
                 tasks.append({'id': task['id'], 'title': task['title'], 'timing': task['timing'],
+                              **({'description': task['description']} if 'description' in task else {}),
                               'status': state['state'], 'claimed_by_you': state['claimant'] == row['recipient'],
                               'declined_by_you': bool(declined)})
             return {'message': own['message'], 'acknowledged': bool(row['acknowledged']), 'tasks': tasks}

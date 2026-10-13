@@ -1,6 +1,6 @@
 # Autofever service core
 
-This is the persistent backend component for the notification/help/recovery chain, with a **local-only recipient web interface**. It is not deployed or connected to a real notification provider. The owner's mobile preview still uses its own browser storage. Do not expose the development listener to the internet or describe passing tests as message-delivery evidence.
+This is the persistent backend component for the notification/help/recovery chain, with **local-only owner and recipient web interfaces**. It is not deployed or connected to a real notification provider. The standalone preview still uses only browser storage; the opt-in `/owner` mode connects that same profile editor to the service. Do not expose the development listener to the internet or describe passing tests as message-delivery evidence.
 
 ## Run the tests
 
@@ -16,14 +16,16 @@ On Linux, the environment's Python executable is `backend/.venv/bin/python`. The
 
 ## Implemented boundary
 
-`backend.service.Store` is the authoritative in-process interface. The recipient HTTP subset is documented below and in [OpenAPI](openapi.yaml). Owner provisioning, activation, closing and dispatch remain trusted in-process operations, not public routes.
+`backend.service.Store` is the authoritative in-process interface. HTTP routes are documented in [OpenAPI](openapi.yaml), with the optional owner flow explained in [the owner contract](owner-api.md). Owner provisioning and dispatch remain trusted in-process operations with no HTTP routes.
 
 | Operation | Inputs | Result and rules |
 | --- | --- | --- |
 | `Store(path, key, clock=...)` | Dedicated SQLite file; operator-managed 32-byte key; optional test clock | Initializes a new empty Autofever store or validates an existing one. Rejects another application's database, missing schema, wrong key and missing key check. |
 | `create_owner()` | Trusted operator call only | Returns a random owner capability once; only its SHA-256 hash is stored. This is not public signup or a decision to require an app account. |
 | `activate(owner, command, snapshot, link_ttl=...)` | Valid owner capability; stable idempotency key; saved snapshot; explicit lifetime of 60–604800 seconds | Atomically snapshots one episode, recipient capabilities, tasks and outgoing jobs. Same command/content returns the same episode. Changed content with the same command fails. |
-| `episode(owner, episode_id)` | Owner capability | Own episode state and per-recipient notification status/attempts; no recipient capability or destination is exposed. |
+| `episode(owner, episode_id)` | Owner capability | Own immutable snapshot (including own selected contacts/destinations), notification states/attempts, acknowledgments, claims and declines; never recipient capabilities. |
+| `latest_episode(owner)` | Owner capability | Most recently created own episode including a terminal episode, or `None`; no other owner's records. |
+| `activate_profile(owner, command, profile, contacts, link_ttl=...)` | Saved profile plus exactly its selected contacts | Validates/converts the preview format, then uses the same atomic, idempotent activation path. Stores an immutable, encrypted copy of all supplied preparation fields. |
 | `recipient(token)` | A recipient capability | That recipient's message and assigned tasks only. Reading does not acknowledge or claim anything. |
 | `acknowledge(token)` | A valid recipient capability | Explicit, repeatable receipt acknowledgment, separate from provider acceptance. |
 | `respond(token, task_id, action)` | `accept`, `decline` or `complete` | Only assigned helpers may act. One helper claims a task; only that helper can complete it. Another helper cannot see the claimant's identity. |
@@ -44,7 +46,7 @@ Snapshot shape (synthetic example):
 }
 ```
 
-Limits are 100 recipients, 100 tasks, 80-character identifiers and 10,000-character messages. Unknown fields are rejected rather than silently losing intended behavior. Channels accepted as data are `email`, `sms`, `whatsapp` and `push`; none has a real adapter yet. Phone destinations require international `+` notation. Recurrence, backup-helper and reminder settings from the browser are **not yet represented**: do not discard them when constructing a server snapshot. Expand and test the contract first. One recipient currently has one chosen channel; multi-channel preference/fallback remains work.
+Limits are 100 recipients, 100 tasks, 80-character identifiers and 10,000-character core messages (2,000 for preview-profile messages). Unknown fields are rejected rather than silently losing intended behavior. Channels accepted by the core as data are `email`, `sms`, `whatsapp` and `push`; none has a real adapter yet. Phone destinations require international `+` notation. Preview activation preserves recurrence, backup-helper, check-in, duration and recovery preferences in encrypted `preparation`, but **does not execute recurring jobs, check-ins or automatic backup/fallback**. The owner UI labels these preferences accordingly. One recipient currently has one chosen initial channel. Profiles with multiple selected channels or Push fail before activation rather than silently choosing a destination or discarding channels. Multichannel/fallback and Push remain required work, not removed product requirements.
 
 ## Delivery semantics
 
@@ -71,7 +73,7 @@ Implementation references: [Python SQLite transaction documentation](https://doc
 
 ## Verification checkpoint — 13 October 2026
 
-37 automated cases pass locally on Python 3.11.15 and cryptography 46.0.7: 24 service cases, 12 WSGI boundary cases and one real loopback HTTP integration case. Coverage includes persistent idempotency, owner/recipient isolation, concurrent activation and job claims, exclusive task claims, private declines, acknowledgments, recovery targeting, cancellation, retries, ambiguous outcomes, worker crash leases, ciphertext substitution, wrong keys, transaction rollback and refusal to modify another application's database. HTTP cases exercise origin/host restrictions, bearer scope, duplicate JSON fields, malformed bodies, size limits, method/path restrictions, generic errors and persistence across reopening the store.
+45 automated cases pass locally on Python 3.11.15 and cryptography 46.0.7: 24 service cases, 12 recipient WSGI boundary cases, eight owner/profile cases and one real loopback HTTP integration case. Coverage includes persistent idempotency, owner/recipient isolation, concurrent activation and job claims, exclusive task claims, private declines, acknowledgments, recovery targeting, cancellation, retries, ambiguous outcomes, worker crash leases, ciphertext substitution, wrong keys, transaction rollback and refusal to modify another application's database. HTTP cases exercise origin/host restrictions, bearer scope, duplicate JSON fields, malformed bodies, size limits, method/path restrictions, generic errors and persistence across reopening the store. Owner cases additionally cover lossless preparation, helper outcomes, strict unsupported-channel rejection, repeatable closure and mismatched prepared snapshots.
 
 A separate local Chromium browser check exercised the actual HTTP service with disposable synthetic records, without mocked fetch: personal link, explicit acknowledgment, accept/decline/complete, second-helper conflict, offline error/reload recovery and missing/invalid-link states. Page identity, meaningful content, absence of framework overlays, clean successful-flow console, same-origin requests, stripped URL fragments, empty browser storage and screenshots were checked at 320, 390 and 1280 CSS-pixel widths. Deliberately induced offline/404/409 responses are expected errors, not successful operations. This is not physical-phone, Safari, screen-reader or production evidence.
 
@@ -104,4 +106,10 @@ The path above is illustrative, not an existing provisioned database. `AUTOFEVER
 
 This listener binds only `127.0.0.1`, uses exact Host/Origin checks and suppresses request logging, including accidentally pasted query secrets. A top-level navigation from an external message can open the generic page; cross-site API access cannot. The WSGI app itself currently refuses non-loopback origins. Do not forward/tunnel this port or replace the loopback binding to deploy it. The development server is single-process, has a ten-second connection timeout and has **no production rate limiter or edge protection**. See [Python's WSGI development-server documentation](https://docs.python.org/3/library/wsgiref.html#module-wsgiref.simple_server).
 
-Remaining required work: owner HTTP authentication/provisioning and safe device credential recovery; production rate limits and HTTP server; owner-browser integration without losing saved profile fields; real provider adapters and delivery evidence; updates, reminders, recurrence, escalation, backup helpers and fallback channels; handling/reconciling uncertain jobs; deletion/retention, database backup/restore and key rotation; production dependency/security review; English recipient UI; Linux and shared-host testing; HTTPS deployment on the existing `013-hire-ai` host as `028-autofever`. No new server, paid service, production data, real message or server configuration was used by this work.
+## Optional owner connection
+
+Add `--with-owner` to the local listener command and open `/owner`. This serves the existing profile editor with an optional connection module, not a second copy of the app. Provisioning an owner is still a trusted `Store.create_owner()` call; there is no public signup endpoint or automatic message sender. See [owner setup and lifecycle](owner-api.md) for the exact boundary and limitations.
+
+A local Chromium end-to-end test used a disposable database, a separately provisioned test owner and an injected synthetic sender. It exercised one-press activation of the saved profile (not its separate draft), loss of the HTTP response **after the real activation committed**, reload and idempotent retry (one episode, two initial jobs), recipient acknowledgment/acceptance/completion shown to the owner, and loss of the response after recovery committed. Reload reconciled recovery without duplicating jobs, and the recipient link then denied access. There were no external deliveries. The unchanged standalone preview's six browser suites and runner checks also passed. The development test transport intentionally dropped selected responses; normal successful interactions had no console errors. Owner layout was checked at 320, 390 and 1280 CSS pixels.
+
+Remaining required work: production owner provisioning, credential rotation/revocation and safe device credential recovery; production rate limits and HTTP server; real provider adapters and delivery evidence; updates, reminders, recurrence, escalation, backup helpers and fallback channels; handling/reconciling uncertain jobs; deletion/retention, database backup/restore and key rotation; production dependency/security review; English UI; Linux and shared-host testing; HTTPS deployment on the existing `013-hire-ai` host as `028-autofever`. No new server, paid service, production data, real message or server configuration was used by this work.
