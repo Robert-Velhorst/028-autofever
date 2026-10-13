@@ -17,7 +17,7 @@ concurrency:
 jobs:
   runtime_matrix:
     name: Load supported backend matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       backend: ${{ steps.read.outputs.backend }}
     steps:
@@ -59,7 +59,7 @@ jobs:
 
   isolated-container:
     name: Isolated Linux test container
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out source

@@ -1,7 +1,7 @@
 {
   "backend": [
     {
-      "os": "ubuntu-latest",
+      "os": "ubuntu-24.04",
       "python": "3.11"
     },
     {
