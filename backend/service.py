@@ -35,6 +35,10 @@ class Conflict(Exception):
     pass
 
 
+class RestoreHeld(RuntimeError):
+    """A recovered database is evidence to review, not a live application store."""
+
+
 class SendFailure(Exception):
     """Only use retryable/permanent when the provider definitely did not accept.
 
@@ -152,16 +156,30 @@ CREATE INDEX IF NOT EXISTS due_jobs ON jobs(status,due);
 """
 
 
-class Store:
-    def __init__(self, path, key, *, clock=time.time):
+class RecordCodec:
+    """Record encryption shared by the live store and offline backup verifier."""
+
+    def __init__(self, key):
         if not isinstance(key, bytes) or len(key) != 32:
             raise Invalid('Supply a 32-byte key from private operator configuration')
-        self.path = Path(path)
-        if self.path.is_symlink():
-            raise Invalid('Symlink database refused')
         material = HKDF(algorithm=hashes.SHA256(), length=64, salt=None,
                         info=b'autofever:service:v1').derive(key)
-        self.key, self.cipher, self.clock = material[32:], AESGCM(material[:32]), clock
+        self.key, self.cipher = material[32:], AESGCM(material[:32])
+
+    def seal(self, identity, value):
+        nonce = os.urandom(12)
+        return nonce + self.cipher.encrypt(nonce, encoded(value), ('autofever:v1:' + identity).encode())
+
+    def open(self, identity, value):
+        return json.loads(self.cipher.decrypt(value[:12], value[12:], ('autofever:v1:' + identity).encode()))
+
+
+class Store(RecordCodec):
+    def __init__(self, path, key, *, clock=time.time):
+        super().__init__(key)
+        self.path, self.clock = Path(path), clock
+        if self.path.is_symlink():
+            raise Invalid('Symlink database refused')
         if not self.path.exists():
             fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.close(fd)
@@ -196,6 +214,12 @@ class Store:
             db.execute('PRAGMA foreign_keys=ON')
             db.execute('PRAGMA synchronous=FULL')
             db.execute('BEGIN IMMEDIATE')
+            # Checked on every transaction, including startup and read routes.
+            # Presence alone blocks use even if the marker is damaged. An old
+            # snapshot may contain valid but subsequently revoked capabilities.
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").fetchone():
+                if db.execute("SELECT 1 FROM metadata WHERE name='restore-hold'").fetchone():
+                    raise RestoreHeld('Restored copy requires offline operator review')
             yield db
             db.commit()
         except BaseException:
@@ -203,13 +227,6 @@ class Store:
             raise
         finally:
             db.close()
-
-    def seal(self, identity, value):
-        nonce = os.urandom(12)
-        return nonce + self.cipher.encrypt(nonce, encoded(value), ('autofever:v1:' + identity).encode())
-
-    def open(self, identity, value):
-        return json.loads(self.cipher.decrypt(value[:12], value[12:], ('autofever:v1:' + identity).encode()))
 
     def create_owner(self):
         """Trusted provisioning only; never expose as an unauthenticated public endpoint."""

@@ -1,0 +1,5 @@
+# Private server archives and owned staging directories are never source files.
+*.afbackup
+.autofever-backup-*/
+.autofever-restore-*/
+.autofever-verify-*/
