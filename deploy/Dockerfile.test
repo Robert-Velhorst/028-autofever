@@ -8,6 +8,7 @@ COPY backend/smtp.example.json /app/backend/
 COPY backend/tests/*.py /app/backend/tests/
 COPY backend/static/*.js backend/static/*.css backend/static/*.html backend/static/*.svg /app/backend/static/
 COPY illness-preview/index.html /app/illness-preview/index.html
+COPY illness-preview/i18n.js /app/illness-preview/i18n.js
 RUN useradd --uid 1028 --create-home autofever-test
 USER 1028:1028
 ENV PYTHONDONTWRITEBYTECODE=1
