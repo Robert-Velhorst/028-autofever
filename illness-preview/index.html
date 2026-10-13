@@ -72,7 +72,7 @@ async function openStore(){
  else data=clone(seed);
  const storedConcepts=await request(db.transaction('vault').objectStore('vault').get('concepts'));
  if(storedConcepts)concepts=await unseal(storedConcepts);
- if(online)await online.init({db,seal,unseal,request,checkedWrite,esc,render,say,focusHeading,getData:()=>data,getRevision:()=>revision});
+ if(online)await online.init({db,seal,unseal,request,checkedWrite,esc,render,say,focusHeading,getData:()=>data,getRevision:()=>revision,backupKey,to64});
  ready=true;render();focusHeading();
 }
 function writeItems(items){return new Promise((resolve,reject)=>{const tx=db.transaction('vault','readwrite');for(const [id,value]of Object.entries(items))tx.objectStore('vault').put(value,id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('Opslaan afgebroken'));});}

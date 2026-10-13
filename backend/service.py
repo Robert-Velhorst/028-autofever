@@ -379,39 +379,50 @@ class Store(RecordCodec):
                     self._job(db, eid, {**recipient, 'message': message}, 'update', record['created_at'], batch=command, update_command=command)
             db.execute('INSERT INTO metadata VALUES (?,?)', (identity, self.seal(identity, record)))
 
+    def _episode_view(self, db, row, *, include_closed_checkin=False):
+        eid = row['id']
+        jobs = db.execute('SELECT id,recipient,kind,status,attempts FROM jobs WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
+        recipients = db.execute('SELECT recipient,acknowledged FROM recipients WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
+        tasks = db.execute('SELECT id,state,claimant FROM tasks WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
+        declines = db.execute('SELECT task,recipient FROM declines WHERE episode=?', (eid,)).fetchall()
+        value = self.open(eid, row['data'])
+        checkin = None
+        prepared = value.get('preparation', {}).get('profile')
+        if prepared and (row['state'] == 'active' or include_closed_checkin):
+            identity = 'checkin:' + eid
+            saved = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+            confirmed = self.open(identity, saved['value']) if saved else None
+            if confirmed is not None:
+                validate_checkin_record(confirmed)
+            last = confirmed['confirmed_at'] if confirmed else row['created']
+            interval = prepared['checkin'] * 3600
+            due = last + interval
+            checkin = {'interval_hours': prepared['checkin'],
+                       'last_confirmed_at': confirmed['confirmed_at'] if confirmed else None,
+                       'next_due_at': due, 'due': row['state'] == 'active' and int(self.clock()) >= due}
+        return {'id': eid, 'state': row['state'], 'checkin': checkin, 'notifications': [dict(x) for x in jobs],
+                'updates': self.updates(db, eid), 'snapshot': value,
+                'recipients': [{'id': r['recipient'], 'acknowledged': bool(r['acknowledged'])} for r in recipients],
+                'tasks': [{**dict(t), 'declined_by': [d['recipient'] for d in declines if d['task'] == t['id']]} for t in tasks]}
+
     def episode(self, owner_token, eid):
         with self.transaction() as db:
-            row = self._episode(db, owner_token, eid)
-            jobs = db.execute('SELECT id,recipient,kind,status,attempts FROM jobs WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
-            recipients = db.execute('SELECT recipient,acknowledged FROM recipients WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
-            tasks = db.execute('SELECT id,state,claimant FROM tasks WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
-            declines = db.execute('SELECT task,recipient FROM declines WHERE episode=?', (eid,)).fetchall()
-            value = self.open(eid, row['data'])
-            checkin = None
-            prepared = value.get('preparation', {}).get('profile')
-            if row['state'] == 'active' and prepared:
-                identity = 'checkin:' + eid
-                saved = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
-                confirmed = self.open(identity, saved['value']) if saved else None
-                if confirmed is not None:
-                    validate_checkin_record(confirmed)
-                last = confirmed['confirmed_at'] if confirmed else row['created']
-                interval = prepared['checkin'] * 3600
-                due = last + interval
-                checkin = {'interval_hours': prepared['checkin'],
-                           'last_confirmed_at': confirmed['confirmed_at'] if confirmed else None,
-                           'next_due_at': due, 'due': int(self.clock()) >= due}
-            return {'id': eid, 'state': row['state'], 'checkin': checkin, 'notifications': [dict(x) for x in jobs],
-                    'updates': self.updates(db, eid),
-                    'snapshot': value,
-                    'recipients': [{'id': r['recipient'], 'acknowledged': bool(r['acknowledged'])} for r in recipients],
-                    'tasks': [{**dict(t), 'declined_by': [d['recipient'] for d in declines if d['task'] == t['id']]} for t in tasks]}
+            return self._episode_view(db, self._episode(db, owner_token, eid))
 
     def latest_episode(self, owner_token):
         with self.transaction() as db:
             owner = self._owner(db, owner_token)
             row = db.execute('SELECT id FROM episodes WHERE owner=? ORDER BY created DESC,rowid DESC LIMIT 1', (owner,)).fetchone()
         return self.episode(owner_token, row['id']) if row else None
+
+    def export_owner(self, owner_token):
+        """Return the authenticated owner's complete server-side episode history."""
+        with self.transaction() as db:
+            owner = self._owner(db, owner_token)
+            rows = db.execute('SELECT * FROM episodes WHERE owner=? ORDER BY created,rowid', (owner,)).fetchall()
+            return {'format': 'autofever-owner-export', 'version': 1, 'exported_at': int(self.clock()),
+                    'episodes': [{'created_at': row['created'],
+                                  **self._episode_view(db, row, include_closed_checkin=True)} for row in rows]}
 
     def activate_profile(self, owner_token, command, profile, contacts, *, link_ttl):
         try:

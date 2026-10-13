@@ -35,6 +35,23 @@ paths:
         '405': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/owner/export:
+    get:
+      operationId: exportOwnerEpisodeHistory
+      summary: Read the authenticated owner's complete server-side episode history
+      description: |
+        The HTTPS owner client encrypts this response locally before offering a download.
+        This endpoint itself returns authenticated JSON and must only be used through the
+        configured same-origin connection. It excludes capability tokens and sender receipts.
+      security: [{ownerCapability: []}]
+      responses:
+        '200': {$ref: '#/components/responses/OwnerExport'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/owner/episodes:
     post:
       operationId: activateSavedOwnerProfile
@@ -392,6 +409,86 @@ components:
                       state: {type: string, enum: [pending, accepted, completed, closed]}
                       claimant: {type: [string, 'null']}
                       declined_by: {type: array, items: {type: string}}
+    OwnerExport:
+      type: object
+      additionalProperties: false
+      required: [data]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [format, version, exported_at, episodes]
+          properties:
+            format: {type: string, const: autofever-owner-export}
+            version: {type: integer, const: 1}
+            exported_at: {type: integer}
+            episodes:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [created_at, id, state, checkin, snapshot, notifications, updates, recipients, tasks]
+                properties:
+                  created_at: {type: integer}
+                  id: {type: string}
+                  state: {type: string, enum: [active, recovered, cancelled]}
+                  checkin:
+                    oneOf:
+                      - {type: 'null'}
+                      - type: object
+                        required: [interval_hours, last_confirmed_at, next_due_at, due]
+                        properties:
+                          interval_hours: {type: integer, minimum: 1, maximum: 168}
+                          last_confirmed_at: {type: [integer, 'null']}
+                          next_due_at: {type: integer}
+                          due: {type: boolean}
+                  snapshot: {type: object, description: Owner-only immutable episode snapshot; capability tokens are excluded.}
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, recipient, kind, status, attempts]
+                      properties:
+                        id: {type: string}
+                        recipient: {type: string}
+                        kind: {type: string, enum: [illness, recovery, update]}
+                        status: {type: string, enum: [queued, sending, accepted, failed, uncertain, cancelled]}
+                        attempts: {type: integer, minimum: 0}
+                  updates:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [version, command, message, recipients, created_at]
+                      properties:
+                        version: {type: integer, const: 1}
+                        command: {type: string}
+                        message: {type: string, maxLength: 2000}
+                        recipients: {type: array, items: {type: string}}
+                        created_at: {type: integer}
+                  recipients:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, acknowledged]
+                      properties:
+                        id: {type: string}
+                        acknowledged: {type: boolean}
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, state, claimant, declined_by]
+                      properties:
+                        id: {type: string}
+                        state: {type: string, enum: [pending, accepted, completed, closed]}
+                        claimant: {type: [string, 'null']}
+                        declined_by: {type: array, items: {type: string}}
+      description: Authenticated JSON response. The browser encrypts it with a user-supplied passphrase before download; this is not a restorable local-profile backup.
     RecipientView:
       type: object
       additionalProperties: false
@@ -448,6 +545,11 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/OwnerView'}
+    OwnerExport:
+      description: Complete owner-scoped server history. Cache-Control no-store; browser encrypts before download.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/OwnerExport'}
     View:
       description: Current scoped recipient view. All responses use Cache-Control no-store.
       content:

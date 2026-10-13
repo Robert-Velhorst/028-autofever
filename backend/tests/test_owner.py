@@ -97,11 +97,13 @@ class OwnerTests(unittest.TestCase):
         body = {'episode_id': episode['id'], 'command': 'checkin-one'}
         self.assertEqual(self.request(path, 'POST', body, token=self.other)['status'], 404)
         self.assertEqual(self.request(path, 'POST', body)['status'], 409)
+        notifications_before = episode['notifications']
         now[0] += 4 * 3600
         first = self.request(path, 'POST', body)
         self.assertEqual(first['status'], 200)
         checked_view = json.loads(first['body'])['data']
         checked = checked_view['checkin']
+        self.assertEqual(checked_view['notifications'], notifications_before)
         self.assertEqual(checked, {'interval_hours': 4, 'last_confirmed_at': now[0],
                                   'next_due_at': now[0] + 4 * 3600, 'due': False})
         self.assertEqual(len(checked_view['notifications']), 2)
@@ -129,6 +131,31 @@ class OwnerTests(unittest.TestCase):
         close = {'episode_id': episode['id'], 'state': 'cancelled', 'recovery_message': None}
         self.assertEqual(self.request('/api/v1/owner/episode-closures', 'POST', close)['status'], 200)
         self.assertEqual(self.request(path, 'POST', {'episode_id': episode['id'], 'command': 'checkin-one'})['status'], 409)
+
+    def test_server_export_is_complete_owner_scoped_and_omits_capabilities(self):
+        now = [1_800_000_000]
+        self.store.clock = lambda: now[0]
+        first = json.loads(self.activate()['body'])['data']
+        now[0] += 4 * 3600
+        self.store.confirm_checkin(self.owner, first['id'], 'export-checkin')
+        self.store.close(self.owner, first['id'], 'cancelled')
+        second = json.loads(self.activate(command='episode-two')['body'])['data']
+        exported = self.store.export_owner(self.owner)
+        self.assertEqual(exported['format'], 'autofever-owner-export')
+        self.assertEqual([item['id'] for item in exported['episodes']], [first['id'], second['id']])
+        self.assertEqual([item['state'] for item in exported['episodes']], ['cancelled', 'active'])
+        self.assertEqual(exported['episodes'][0]['checkin']['last_confirmed_at'], now[0])
+        self.assertFalse(exported['episodes'][0]['checkin']['due'])
+        self.assertEqual(self.store.export_owner(self.other)['episodes'], [])
+        serialized = json.dumps(exported)
+        for private in (self.owner, self.other, 'action_token', 'smtp-accepted', 'access-token'):
+            self.assertNotIn(private, serialized)
+        response = self.request('/api/v1/owner/export')
+        self.assertEqual(response['status'], 200)
+        self.assertEqual(response['headers']['Cache-Control'], 'no-store')
+        self.assertEqual(len(json.loads(response['body'])['data']['episodes']), 2)
+        self.assertEqual(self.request('/api/v1/owner/export', token=self.other)['status'], 200)
+        self.assertEqual(self.request('/api/v1/owner/export', token='A' * 43)['status'], 404)
 
     def test_recovery_targets_accepted_only_and_closure_is_repeatable(self):
         episode = json.loads(self.activate()['body'])['data']

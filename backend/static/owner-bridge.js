@@ -186,7 +186,7 @@ window.AutofeverBridge = (() => {
       if(hint) hint.textContent='De server bewaart de melding en wachtrij. Zonder bezorgdienst worden er geen berichten verstuurd. Check-ins zijn zichtbaar zodra je Autofever opent; herhaalde hulp en reservehelpers zijn nog niet geautomatiseerd.';
     }
     if (view !== 'settings') return;
-    document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Lokale server koppelen</h2><p class="hint">Eenmalige privésleutel van de beheerder, geen nieuw account. Alleen deze server op dit adres. Bewaar de sleutel apart; de profielback-up bevat hem niet. De sleutel wordt hier versleuteld opgeslagen, met de browsersleutel op hetzelfde apparaat.</p>'+(state.token?'<p class="hint">Koppeling bewaard. Verlopen hulp-links sluiten na '+escape(state.hours)+' uur.</p>':'')+'<form id="owner-connect"><label for="owner-token">Privésleutel voor jouw meldingen</label><input id="owner-token" type="password" autocomplete="off" maxlength="43" required><label for="owner-hours">Geldigheid hulplink in uren</label><input id="owner-hours" type="number" min="1" max="168" value="'+escape(state.hours||24)+'" required><div class="actions"><button class="primary" type="submit">Koppeling controleren en bewaren</button></div></form><p class="hint">Terugzetten van een profielback-up wijzigt geen lopende servermelding. Meerdere kanalen per persoon en push zijn nog niet aangesloten; kies voor deze koppeling één beginkanaal.</p></section>');
+    document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens exporteren</h2><p class="hint">Dit bevat je serverhistorie: ziekte- en herstelberichten, contactgegevens, helperstatus en check-ins. De download wordt eerst met een aparte wachtzin versleuteld. Bewaar die wachtzin los van het bestand. Dit exporteert niet je lokale profielen; gebruik daarvoor de gewone Autofever-back-up.</p><form id="owner-export"><label for="owner-export-password">Wachtzin voor de serverexport</label><input id="owner-export-password" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><label for="owner-export-confirm">Herhaal de wachtzin</label><input id="owner-export-confirm" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><p class="hint">Minstens 14 tekens. De wachtzin wordt niet opgeslagen of naar de server gestuurd.</p><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Versleutelde serverexport downloaden</button></div></form></section><section class="section-gap"><h2>Lokale server koppelen</h2><p class="hint">Eenmalige privésleutel van de beheerder, geen nieuw account. Alleen deze server op dit adres. Bewaar de sleutel apart; de profielback-up bevat hem niet. De sleutel wordt hier versleuteld opgeslagen, met de browsersleutel op hetzelfde apparaat.</p>'+(state.token?'<p class="hint">Koppeling bewaard. Verlopen hulplinks sluiten na '+escape(state.hours)+' uur.</p>':'')+'<form id="owner-connect"><label for="owner-token">Privésleutel voor jouw meldingen</label><input id="owner-token" type="password" autocomplete="off" maxlength="43" required><label for="owner-hours">Geldigheid hulplink in uren</label><input id="owner-hours" type="number" min="1" max="168" value="'+escape(state.hours||24)+'" required><div class="actions"><button class="primary" type="submit">Koppeling controleren en bewaren</button></div></form><p class="hint">Terugzetten van een profielback-up wijzigt geen lopende servermelding. Meerdere kanalen per persoon en push zijn nog niet aangesloten; kies voor deze koppeling één beginkanaal.</p></section>');
   }
   document.addEventListener('click', event => {
     const control = event.target.closest('[data-owner-action]');
@@ -210,6 +210,25 @@ window.AutofeverBridge = (() => {
         if(!draft.message.trim() || !draft.recipients.length) throw {userMessage:'Schrijf een update en selecteer minstens één ontvanger.'};
         await save({...state,updateDraft:draft,pending:{path:'episode-updates',body:{episode_id:current.id,command:crypto.randomUUID(),message:draft.message.trim(),recipients:draft.recipients}}});
         await submitPending();
+      });
+      return;
+    }
+    if(event.target.id === 'owner-export' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      run(async () => {
+        if(!state.token || state.pending) throw {userMessage:'Koppel eerst de server en los een eventuele onzekere actie op.'};
+        const password=document.getElementById('owner-export-password').value;
+        const confirm=document.getElementById('owner-export-confirm').value;
+        if(password.length<14 || password!==confirm) throw {userMessage:'Gebruik minstens 14 tekens en vul tweemaal dezelfde wachtzin in.'};
+        const exported=await api('export');
+        if(exported?.format!=='autofever-owner-export' || exported.version!==1 || !Array.isArray(exported.episodes)) throw {userMessage:'De serverexport heeft een onbekend formaat. Er is geen bestand gemaakt.'};
+        const salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
+        const plain=new TextEncoder().encode(JSON.stringify(exported));
+        const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},await ctx.backupKey(password,salt),plain);
+        const envelope={format:'autofever-owner-export',version:1,kdf:'PBKDF2-SHA256',iterations:600000,salt:ctx.to64(salt),iv:ctx.to64(iv),body:ctx.to64(new Uint8Array(encrypted))};
+        const blob=new Blob([JSON.stringify(envelope)],{type:'application/json'}), url=URL.createObjectURL(blob), link=document.createElement('a');
+        link.href=url;link.download='autofever-server-'+new Date().toISOString().slice(0,10)+'.afexport';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+        event.target.reset();ctx.say('Versleutelde serverexport aangeboden als download. Bewaar de wachtzin apart.');
       });
       return;
     }

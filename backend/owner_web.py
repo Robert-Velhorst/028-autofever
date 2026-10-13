@@ -10,6 +10,7 @@ from backend.web import RecipientApp, RequestError
 
 OWNER_ROUTES = {
     '/api/v1/owner/episode': 'GET',
+    '/api/v1/owner/export': 'GET',
     '/api/v1/owner/episodes': 'POST',
     '/api/v1/owner/episode-closures': 'POST',
     '/api/v1/owner/episode-updates': 'POST',
@@ -47,6 +48,8 @@ class OwnerApp(RecipientApp):
             return super().api(path, method, token, value)
         if path.endswith('/episode'):
             result = self.store.latest_episode(token)
+        elif path.endswith('/export'):
+            result = self.store.export_owner(token)
         elif path.endswith('/episodes'):
             if not isinstance(value, dict) or set(value) != {'command', 'profile', 'contacts', 'link_ttl'}:
                 raise RequestError(400)
