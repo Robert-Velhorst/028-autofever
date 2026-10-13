@@ -5,6 +5,9 @@ window.AutofeverBridge = (() => {
   const labels = {queued:'In wachtrij · niet verstuurd',sending:'Wordt aangeboden · uitkomst nog onbekend',accepted:'Aangenomen door de bezorgdienst · bezorging niet bevestigd',failed:'Niet verstuurd · mislukt',uncertain:'Verzenduitkomst onzeker · controle nodig',cancelled:'Geannuleerd · niet verstuurd'};
   const button = (label, action, cls='secondary') => '<button type="button" class="'+cls+'" data-owner-action="'+action+'">'+label+'</button>';
   const escape = value => ctx.esc(value);
+  const confirmText = message => window.confirm(window.AutofeverLocale?.translate(message) || message);
+  const ownerDeletePhrase = value => ['VERWIJDER MIJN SERVERGEGEVENS','DELETE MY SERVER DATA'].includes(value);
+  const localizedDate = value => new Date(value * 1000).toLocaleString(window.AutofeverLocale?.get() === 'en' ? 'en-GB' : 'nl-NL');
 
   async function save(next) {
     await ctx.checkedWrite({connection: await ctx.seal(next)}, {connection: revision});
@@ -123,7 +126,7 @@ window.AutofeverBridge = (() => {
   }
   function renderHome(view) {
     if (view !== 'home' || (!state.token && !state.pending) || (!current && !error && !state.pending)) return false;
-    let html = '<h1 class="compact-heading">Jouw melding.</h1>';
+    let html = '<h1 class="compact-heading" id="owner-title">Jouw melding.</h1>';
     if (state.pending) html += '<p class="notice">De uitkomst van je laatste actie is nog niet bevestigd. Er wordt geen nieuwe melding gestart.</p>'+button('Uitkomst controleren','resolve','primary');
     if (error) html += '<p class="notice" role="status">'+escape(error)+'</p>';
     if (current) {
@@ -140,7 +143,7 @@ window.AutofeverBridge = (() => {
       }
       if(current.updates?.length) {
         html += '<h2 class="section-gap">Jouw updates</h2>';
-        for(const u of current.updates) html += '<section class="editor-block"><p class="long">'+escape(u.message)+'</p><p class="hint">Voor: '+escape(u.recipients.map(person).join(', '))+' · '+escape(new Date(u.created_at*1000).toLocaleString('nl-NL'))+'</p></section>';
+        for(const u of current.updates) html += '<section class="editor-block"><p class="long">'+escape(u.message)+'</p><p class="hint">Voor: '+escape(u.recipients.map(person).join(', '))+' · '+escape(localizedDate(u.created_at))+'</p></section>';
       }
       html += '<p class="hint">Status bij de laatste controle. Aangenomen door een bezorgdienst betekent niet bezorgd of gelezen.</p><h2 class="section-gap">Berichten</h2>';
       for (const recipient of snap.recipients) {
@@ -162,7 +165,7 @@ window.AutofeverBridge = (() => {
         html += '</section>';
       }
       if (prepared && current.checkin) {
-        const nextCheckin = new Date(current.checkin.next_due_at*1000).toLocaleString('nl-NL');
+        const nextCheckin = localizedDate(current.checkin.next_due_at);
         html += '<section class="editor-block" aria-live="polite"><h2>Check-in</h2>'+
           (current.checkin.due
             ? '<p class="notice">Tijd om even bij jezelf in te checken. Dit is alleen zichtbaar in Autofever; er wordt niemand anders bericht.</p>'+button('Ik ben nog ziek · volgende check-in plannen','checkin','primary')
@@ -198,7 +201,7 @@ window.AutofeverBridge = (() => {
   });
   document.addEventListener('input', event => {
     if(event.target.id === 'owner-data-delete-confirm') {
-      document.querySelector('#owner-data-delete button[type="submit"]').disabled = event.target.value !== 'VERWIJDER MIJN SERVERGEGEVENS';
+      document.querySelector('#owner-data-delete button[type="submit"]').disabled = !ownerDeletePhrase(event.target.value);
     }
   });
   const captureUpdate = event => {
@@ -218,7 +221,7 @@ window.AutofeverBridge = (() => {
         const days=raw===''?null:Number(raw);
         if(days!==null && (!Number.isInteger(days)||days<1||days>3650)) throw {userMessage:'Kies uitzetten of een hele bewaartermijn van 1 tot 3650 dagen.'};
         if(days!==null && (retentionDays===null || days<retentionDays) &&
-           !confirm('Deze kortere bewaartermijn kan bij de volgende dagelijkse serveropschoning oude, afgesloten geschiedenis definitief uit de live database verwijderen. Back-ups en ontvangerkopieën blijven bestaan. Doorgaan?')) return;
+           !confirmText('Deze kortere bewaartermijn kan bij de volgende dagelijkse serveropschoning oude, afgesloten geschiedenis definitief uit de live database verwijderen. Back-ups en ontvangerkopieën blijven bestaan. Doorgaan?')) return;
         const result=await api('retention-setting',{retention_days:days});
         if(result?.retention_days!==days) throw {userMessage:'De server heeft de nieuwe bewaartermijn niet bevestigd. Haal de instelling opnieuw op.'};
         retentionDays=days;
@@ -230,8 +233,8 @@ window.AutofeverBridge = (() => {
       event.preventDefault(); event.stopImmediatePropagation();
       run(async () => {
         if(!state.token || state.pending) throw {userMessage:'Koppel eerst de server en rond een eventuele onzekere actie af.'};
-        if(document.getElementById('owner-data-delete-confirm').value !== 'VERWIJDER MIJN SERVERGEGEVENS') throw {userMessage:'Typ de bevestigingszin exact over om de servergegevens te wissen.'};
-        if(!confirm('Alle live serverepisoden, contactgegevens, helperreacties, check-ins en wachtrijberichten voor deze eigenaar wissen? Lokale profielen blijven bestaan; al bezorgde berichten en operatorback-ups niet.')) return;
+        if(!ownerDeletePhrase(document.getElementById('owner-data-delete-confirm').value)) throw {userMessage:'Typ de bevestigingszin exact over om de servergegevens te wissen.'};
+        if(!confirmText('Alle live serverepisoden, contactgegevens, helperreacties, check-ins en wachtrijberichten voor deze eigenaar wissen? Lokale profielen blijven bestaan; al bezorgde berichten en operatorback-ups niet.')) return;
         const result=await api('data-deletion',{confirmation:'DELETE_MY_SERVER_DATA'});
         if(!Number.isInteger(result?.deleted_episodes) || result.deleted_episodes<0) throw {userMessage:'De server gaf geen geldige wisbevestiging. Controleer de serverstand voordat je verdergaat.'};
         await save({...state,pending:null,updateDraft:null});

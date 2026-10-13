@@ -9,7 +9,7 @@ if (-not $taskUrl.IsAbsoluteUri -or $taskUrl.Scheme -notin @('http', 'https') -o
 }
 $taskNpx = if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { 'npx.cmd' } else { 'npx' }
 $taskSession = "autofever-qa-$PID"
-$taskTests = @('mobile-refinement-qa.js', 'mobile-help-backup-qa.js', 'mobile-refinement-regression-qa.js', 'mobile-dock-qa.js', 'mobile-multitab-qa.js', 'accessibility.js', 'contact-import.js', 'local-vault-deletion.js', 'helper-language.js')
+$taskTests = @('mobile-refinement-qa.js', 'mobile-help-backup-qa.js', 'mobile-refinement-regression-qa.js', 'mobile-dock-qa.js', 'mobile-multitab-qa.js', 'accessibility.js', 'contact-import.js', 'local-vault-deletion.js', 'helper-language.js', 'app-language.js')
 
 function Invoke-TaskBrowser {
     param([string[]] $Arguments)

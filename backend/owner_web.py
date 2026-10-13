@@ -28,8 +28,10 @@ class OwnerApp(RecipientApp):
         root = Path(__file__).parent
         html = (root.parent / 'illness-preview/index.html').read_text(encoding='utf-8')
         html = html.replace('<head>', '<head>\n<script src="/owner-bridge.js"></script>', 1)
+        html = html.replace('<script src="./i18n.js"></script>', '<script src="/autofever-i18n.js"></script>', 1)
         html = html.replace('<title>Autofever · Bewerkbare mobiele preview</title>', '<title>Autofever · Mijn melding</title>')
         self.assets['/owner'] = (html.encode(), 'text/html; charset=utf-8')
+        self.assets['/autofever-i18n.js'] = ((root.parent / 'illness-preview/i18n.js').read_bytes(), 'text/javascript; charset=utf-8')
         self.assets['/owner-bridge.js'] = ((root / 'static/owner-bridge.js').read_bytes(), 'text/javascript; charset=utf-8')
         hashes = ['\'sha256-' + base64.b64encode(hashlib.sha256(script.encode()).digest()).decode() + '\''
                   for script in re.findall(r'<script>(.*?)</script>', html, re.S)]
