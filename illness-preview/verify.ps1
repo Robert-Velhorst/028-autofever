@@ -1,5 +1,5 @@
 param(
-    [string] $BaseUrl = 'http://localhost:8000/'
+    [string] $BaseUrl = 'http://localhost:8000/illness-preview/'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,7 +9,7 @@ if (-not $taskUrl.IsAbsoluteUri -or $taskUrl.Scheme -notin @('http', 'https') -o
 }
 $taskNpx = if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { 'npx.cmd' } else { 'npx' }
 $taskSession = "autofever-qa-$PID"
-$taskTests = @('mobile-refinement-qa.js', 'mobile-help-backup-qa.js', 'mobile-refinement-regression-qa.js', 'mobile-dock-qa.js', 'mobile-multitab-qa.js', 'accessibility.js', 'contact-import.js', 'local-vault-deletion.js')
+$taskTests = @('mobile-refinement-qa.js', 'mobile-help-backup-qa.js', 'mobile-refinement-regression-qa.js', 'mobile-dock-qa.js', 'mobile-multitab-qa.js', 'accessibility.js', 'contact-import.js', 'local-vault-deletion.js', 'helper-language.js')
 
 function Invoke-TaskBrowser {
     param([string[]] $Arguments)

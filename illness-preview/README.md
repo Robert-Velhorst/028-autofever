@@ -28,10 +28,10 @@ The preview does not send messages, create reminder jobs, contact backup helpers
 No frontend build or package installation is needed. From the repository root, with Python 3 installed:
 
 ```sh
-python -m http.server 8000 --bind 127.0.0.1 --directory illness-preview
+python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Open `http://localhost:8000/`. Stop the development server with Ctrl+C. This loopback-only development server is not a phone-accessible production deployment. Production hosting must provide HTTPS, appropriate security headers and a stable origin.
+Open `http://localhost:8000/illness-preview/`. Stop the development server with Ctrl+C. The repository-root server exposes only loopback on this command and lets the verifier exercise both the preview and isolated helper page. This is not a phone-accessible production deployment. Production hosting must provide HTTPS, appropriate security headers and a stable origin.
 
 Web Crypto and IndexedDB require a supported browser and a secure context (HTTPS or localhost). Use a stable host and port: changing the origin means different browser storage. Opening the HTML directly from the filesystem is not the supported route.
 
@@ -50,10 +50,10 @@ Sample contact names illustrate configuration; blank sample contact details are 
 With the development server running, Node.js/npm installed and Chromium available, run this from the repository root in PowerShell:
 
 ```powershell
-./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
+./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/illness-preview/
 ```
 
-The runner uses a pinned Playwright CLI version, creates a dedicated browser session, runs eight suites in isolated contexts with synthetic data, then closes its own session. The first invocation may download the test runner from npm. It accepts loopback URLs only. Tests do not import your browser profile, contact external recipients or need a preview-session key. Test definitions are in `tests/`; paths are relative to the script, not to the original author's computer. Generated CLI artifacts are ignored by Git. The deletion suite checks that a stale tab cannot restore records after the local vault is cleared.
+The runner uses a pinned Playwright CLI version, creates a dedicated browser session, runs eight preview suites in isolated contexts with synthetic data, then tests the bilingual recipient interface from the repository-root server before closing its session. The first invocation may download the test runner from npm. It accepts loopback URLs only. Tests do not import your browser profile, contact external recipients or need a preview-session key. Test definitions are in `tests/`; paths are relative to the script, not to the original author's computer. Generated CLI artifacts are ignored by Git. The deletion suite checks that a stale tab cannot restore records after the local vault is cleared.
 
 Before opening a browser, the runner checks its result-handling contract. A missing result, duplicate success results, a reported tool error or a failed process must fail the run; exit code zero by itself is not treated as proof that a browser test passed. Each browser suite must return exactly one explicit successful result. These controller checks can also be run separately with `./illness-preview/tests/runner-contract.ps1`.
 

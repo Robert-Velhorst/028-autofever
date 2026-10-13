@@ -6,6 +6,10 @@ The 12 preview source, documentation and test files were copied individually ont
 
 Fresh execution on 13 October 2026: `./illness-preview/verify.ps1 -BaseUrl http://127.0.0.1:50170/` completed with exit status 0, six explicit browser-suite PASS results and the five-case runner contract PASS. The independently started Python 3 loopback server served this clean checkout, not a companion copy. Test tooling used Node.js 25.2.1 and the existing pinned Playwright CLI 0.1.19. No notification provider or real recipients were involved. The result is local Chromium evidence, not CI, phone-device or production acceptance.
 
+## Bilingual recipient interface — 2026-10-13
+
+The helper page now offers a per-device Dutch/English interface toggle. A synthetic Chromium flow verified initial Dutch labels, English labels and document language/title, task acceptance and completion in English, switching back to Dutch, and persistence after reloading with the original fragment capability. It also verified that the sender-authored message remains byte-for-byte unchanged and checked horizontal overflow at 320, 390 and 1280 CSS pixels. The isolated test intercepts the API with synthetic data; no real recipient or provider was contacted. Browser console/page errors were absent. This does not translate message/task content, the profile editor or owner screen, and is not physical-device/accessibility acceptance.
+
 ## Original local checkpoint — 2026-09-05
 
 ## Scope

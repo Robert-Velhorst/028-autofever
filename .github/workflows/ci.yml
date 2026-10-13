@@ -82,8 +82,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $taskUrl = 'http://127.0.0.1:8000/'
-          $taskDirectory = (Resolve-Path 'illness-preview').Path
+          $taskUrl = 'http://127.0.0.1:8000/illness-preview/'
+          $taskDirectory = (Resolve-Path '.').Path
           $taskServer = Start-Process -FilePath python -ArgumentList @('-m', 'http.server', '8000', '--bind', '127.0.0.1', '--directory', $taskDirectory) -PassThru -WindowStyle Hidden
           try {
             $taskDeadline = (Get-Date).AddSeconds(30)

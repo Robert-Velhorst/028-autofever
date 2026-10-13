@@ -6,9 +6,9 @@ The name is a wordplay: **auto** means automatic, and **fever** represents sudde
 
 The original idea is intentionally simple: configure the relevant recipients and practical help in advance, then use one prominent action when illness makes ordinary communication difficult. The completed service is intended to send an appropriate absence message, organize optional help, record actual delivery status, and later send a recovery notification. The current preview does not send messages.
 
-> **Project status — 13 October 2026:** a runnable mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts can be imported from a reviewed local vCard file; import does not authorize a channel or select a recipient. Profiles, drafts, help preferences, encrypted backup/restore and accessibility settings also work locally. The optional `/owner` mode connects that editor to the backend: one-press activation, real queue/help status, owner-only in-app check-ins, recovery and cancellation. A due check-in appears when the owner opens Autofever and is reset by an explicit confirmation; it does not message helpers or send a background notification. Owners can export encrypted server history, remove live server records, configure optional live-history retention, and separately clear this browser's local vault. Operator backups and previously delivered messages remain outside these controls; the retention feature's host timer is not yet installed. The separate `/help` page records recipient responses. Actual provider delivery, background reminders, recurring help and production hosting are not connected. This is not a production-ready notification service.
+> **Project status — 13 October 2026:** a runnable mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts can be imported from a reviewed local vCard file; import does not authorize a channel or select a recipient. Profiles, drafts, help preferences, encrypted backup/restore and accessibility settings also work locally. The optional `/owner` mode connects that editor to the backend: one-press activation, real queue/help status, owner-only in-app check-ins, recovery and cancellation. A due check-in appears when the owner opens Autofever and is reset by an explicit confirmation; it does not message helpers or send a background notification. Owners can export encrypted server history, remove live server records, configure optional live-history retention, and separately clear this browser's local vault. Operator backups and previously delivered messages remain outside these controls; the retention feature's host timer is not yet installed. The separate `/help` page now offers Dutch and English interface text for recipient responses; messages written by the sender remain unchanged. The profile editor and owner management interface are still Dutch. Actual provider delivery, background reminders, recurring help and production hosting are not connected. This is not a production-ready notification service.
 
-The current main branch also has a [GitHub Actions quality run](https://github.com/Robert-Velhorst/028-autofever/actions/runs/38453703154) for commit `8d50d2b`: all 188 backend tests on Linux, the same suite in the isolated Linux test container, and all eight mobile browser suites on Windows passed. CI exercises only synthetic/local flows; it neither deploys the service nor verifies a real provider.
+The previous [GitHub Actions quality run](https://github.com/Robert-Velhorst/028-autofever/actions/runs/38453703154) for commit `8d50d2b` passed all 188 backend tests on Linux, the same suite in the isolated Linux test container, and eight mobile browser suites on Windows. The current bilingual helper-page change passes all nine browser suites locally; GitHub Actions for this change must still run. CI exercises only synthetic/local flows; it neither deploys the service nor verifies a real provider.
 
 An initial [SMTP email adapter and queue worker](backend/smtp.md) are also implemented: encrypted connections, private per-recipient messages, recovery messages and explicit handling of failed or uncertain submissions. They have been tested with temporary local mailservers only. There is no configured real mail account, public recipient site or external delivery proof. Running the preview does not start the worker or send messages.
 
@@ -35,17 +35,17 @@ The owner page offers a passphrase-encrypted `.afexport` of server-side episodes
 With Python 3 installed, run this from the repository root:
 
 ```sh
-python -m http.server 8000 --bind 127.0.0.1 --directory illness-preview
+python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Open `http://localhost:8000/`. No frontend build is required. Use a browser supporting IndexedDB and Web Crypto; localhost is supported, opening the HTML as a file is not. Keep the host and port stable to keep using the same browser storage. This loopback-only development server is not public or accessible from a separate phone.
+Open `http://localhost:8000/illness-preview/`. Serving the repository root also makes the isolated helper-page language test available to the browser verifier. No frontend build is required. Use a browser supporting IndexedDB and Web Crypto; localhost is supported, opening the HTML as a file is not. Keep the host and port stable to keep using the same browser storage. This loopback-only development server is not public or accessible from a separate phone.
 
 The flow is: prepare a profile and contacts → save → press **Ik ben ziek** → inspect the local active snapshot → update, recover or cancel. **No recipient is contacted.** The UI explicitly shows that delivery and task acceptance have not occurred. Clearing site data can lose settings; use the password-encrypted backup first.
 
 For developer checks, with Node.js/npm, PowerShell and Chromium available and the server running:
 
 ```powershell
-./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
+./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/illness-preview/
 ```
 
 See [preview documentation](illness-preview/README.md) for limitations and [verification evidence](illness-preview/VERIFICATION.md) for the boundary between local tests and real delivery. No app account is required for this local preview.
@@ -335,18 +335,18 @@ The standalone browser app does not send notifications. The optional owner conne
 For the browser-only preview, start Python's static server from the repository root and bind it to loopback:
 
 ```powershell
-python -m http.server 8000 --bind 127.0.0.1 --directory illness-preview
+python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Open `http://localhost:8000/`. To run its eight isolated Chromium suites, Node.js/npm and Chromium are needed:
+Open `http://localhost:8000/illness-preview/`. To run its nine isolated Chromium suites (eight preview suites plus the bilingual helper-page flow), Node.js/npm and Chromium are needed:
 
 ```powershell
-./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
+./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/illness-preview/
 ```
 
 For the service, use Python 3.11+, create an isolated virtual environment and install `backend/requirements.txt`; then run the commands in [backend test instructions](backend/README.md#run-the-tests). The documented test suite uses synthetic data and local-only services. The hosted entry point refuses implicit serving and exposes only a loopback listener behind its configured proxy. See [deployment preparation](deploy/README.md) before attempting any hosted setup.
 
-The GitHub Actions run [38453703154](https://github.com/Robert-Velhorst/028-autofever/actions/runs/38453703154) for commit `8d50d2b` passes 188 backend tests on Linux, the same suite in the hardened isolated test container, and all eight browser suites on Windows. These are local/synthetic checks; they are not evidence of production deployment, public HTTPS, provider delivery or physical-device acceptance.
+The previous GitHub Actions run [38453703154](https://github.com/Robert-Velhorst/028-autofever/actions/runs/38453703154) for commit `8d50d2b` passed 188 backend tests on Linux, the same suite in the hardened isolated test container, and eight browser suites on Windows. The current branch adds a ninth browser suite for the bilingual helper page; all nine pass locally, while the updated workflow's Actions result is pending. These are local/synthetic checks; they are not evidence of production deployment, public HTTPS, provider delivery or physical-device acceptance.
 
 ## Release readiness and remaining work
 

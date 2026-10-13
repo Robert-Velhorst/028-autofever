@@ -5,36 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
   <title>Autofever · Een beetje hulp</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/help.css">
-  <script src="/help.js" defer></script>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./help.css">
+  <script src="./help.js" defer></script>
 </head>
 <body>
   <div class="app">
-    <header><span class="wordmark">autofever</span></header>
+    <header><span class="wordmark">autofever</span><button id="language" class="language" type="button" lang="en" aria-label="Switch language to English">English</button></header>
     <main>
-      <h1>Een beetje hulp.<br>Meer rust.</h1>
-      <p class="intro">Een persoonlijk bericht voor jou. Je hebt geen account nodig om te reageren.</p>
+      <h1 id="page-title">Een beetje hulp.<br>Meer rust.</h1>
+      <p id="page-intro" class="intro">Een persoonlijk bericht voor jou. Je hebt geen account nodig om te reageren.</p>
       <p id="notice" role="status" aria-live="polite" tabindex="-1">Je bericht wordt opgehaald…</p>
-      <button id="refresh" class="secondary" hidden>Opnieuw ophalen</button>
+      <button id="refresh" class="secondary" hidden>Gegevens vernieuwen</button>
       <div id="content" hidden>
         <section aria-labelledby="message-title" class="message">
           <h2 id="message-title">Het bericht</h2>
           <p id="message"></p>
           <button id="acknowledge">Ik heb dit gelezen</button>
-          <p>Deze leesbevestiging geldt voor het oorspronkelijke bericht, niet voor latere updates.</p>
-          <p class="hint">Alleen openen telt niet als een bevestiging.</p>
+          <p id="ack-copy">Deze leesbevestiging geldt voor het oorspronkelijke bericht, niet voor latere updates.</p>
+          <p id="ack-hint" class="hint">Alleen openen telt niet als een bevestiging.</p>
         </section>
         <section id="updates" aria-label="Updates voor jou"></section>
         <section aria-labelledby="tasks-title">
           <h2 id="tasks-title">Kun je iets doen?</h2>
-          <p class="intro">Kies wat lukt. Nee zeggen mag ook.</p>
+          <p id="tasks-intro" class="intro">Kies wat lukt. Nee zeggen mag ook.</p>
           <div id="tasks"></div>
         </section>
       </div>
-      <noscript><p>Schakel JavaScript in om je persoonlijke bericht te openen en te reageren.</p></noscript>
+      <noscript><p id="noscript-copy">Schakel JavaScript in om je persoonlijke bericht te openen en te reageren.</p></noscript>
     </main>
-    <footer>Deze link geeft toegang tot jouw bericht. Deel hem niet. Bij opnieuw laden open je de oorspronkelijke link opnieuw.</footer>
+    <footer id="page-footer">Deze link geeft toegang tot jouw bericht. Deel hem niet. Bij opnieuw laden open je de oorspronkelijke link opnieuw.</footer>
   </div>
 </body>
 </html>
