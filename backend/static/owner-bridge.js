@@ -176,6 +176,13 @@ window.AutofeverBridge = (() => {
         } else {
           await save({...state,pending:{path:'episode-closures',body:{episode_id:current.id,state:'cancelled',recovery_message:null,recovery_recipients:[]}}});
         }
+      } else if (name === 'submit-recovery-no-notice') {
+        if (!current || current.state !== 'active') throw {userMessage:'Haal eerst de actuele actieve melding op.'};
+        const eligible = current.snapshot.recipients.filter(r => current.notifications.some(j => j.recipient === r.id && j.kind === 'illness' && j.status === 'accepted'));
+        if (eligible.length) throw {userMessage:'Er is nu een ontvanger beschikbaar. Haal de serverstand opnieuw op en controleer je keuze.'};
+        const recovery = current.snapshot.preparation?.profile.recovery;
+        if (!recovery) throw {userMessage:'Deze melding heeft geen opgeslagen hersteltekst.'};
+        await save({...state,recoveryDraft:null,pending:{path:'episode-closures',body:{episode_id:current.id,state:'recovered',recovery_message:recovery,recovery_recipients:[]}}});
       }
       await submitPending();
     });
@@ -200,10 +207,14 @@ window.AutofeverBridge = (() => {
         const eligible = snap.recipients.filter(r => current.notifications.some(j => j.recipient === r.id && j.kind === 'illness' && j.status === 'accepted'));
         recoveryDraft = recoveryDraft?.episode_id === current.id ? recoveryDraft : {episode_id:current.id,message:prepared?.profile.recovery || '',recipients:eligible.map(r=>r.id)};
         html += '<section class="editor-block"><h2>Herstelbericht</h2><p class="hint">Pas tekst en ontvangers aan voordat je de herstelmelding in de wachtrij zet. Kies alleen mensen van wie de oorspronkelijke ziekmelding door de bezorgdienst is aangenomen. Dat is geen bewijs van bezorging of lezen.</p>';
-        html += '<form id="owner-recovery"><label for="owner-recovery-message">Bericht bij herstel</label><textarea id="owner-recovery-message" name="message" maxlength="10000" required>'+escape(recoveryDraft.message)+'</textarea><fieldset><legend>Ontvangers van het herstelbericht</legend>';
-        for(const r of eligible) html += '<label class="check"><input type="checkbox" name="recipient" value="'+escape(r.id)+'"'+(recoveryDraft.recipients.includes(r.id)?' checked':'')+'><span>'+escape(person(r.id))+'</span></label>';
-        if(!eligible.length) html += '<p>Geen ontvangers beschikbaar: geen oorspronkelijke ziekmelding is door een bezorgdienst aangenomen.</p>';
-        html += '</fieldset><p class="hint">De herstelmelding sluit deze ziekmelding. Er wordt niets naar andere personen gestuurd.</p><div class="actions"><button class="primary" type="submit"'+(!eligible.length?' disabled':'')+'>Herstelbericht in wachtrij zetten</button>'+button('Concept bewaren','save-recovery-draft')+button('Editor sluiten','hide-recovery','text-button')+'</div></form></section>';
+        if(!eligible.length) {
+          html += '<p>Geen ontvangers beschikbaar: geen oorspronkelijke ziekmelding is door een bezorgdienst aangenomen.</p><p class="hint">Je kunt herstel wel vastleggen. Er wordt dan geen herstelbericht in de wachtrij gezet en niemand wordt geïnformeerd.</p><div class="actions">'+button('Herstel vastleggen zonder bericht','submit-recovery-no-notice','primary')+button('Editor sluiten','hide-recovery','text-button')+'</div>';
+        } else {
+          html += '<form id="owner-recovery"><label for="owner-recovery-message">Bericht bij herstel</label><textarea id="owner-recovery-message" name="message" maxlength="10000" required>'+escape(recoveryDraft.message)+'</textarea><fieldset><legend>Ontvangers van het herstelbericht</legend>';
+          for(const r of eligible) html += '<label class="check"><input type="checkbox" name="recipient" value="'+escape(r.id)+'"'+(recoveryDraft.recipients.includes(r.id)?' checked':'')+'><span>'+escape(person(r.id))+'</span></label>';
+          html += '</fieldset><p class="hint">De herstelmelding sluit deze ziekmelding. Er wordt niets naar andere personen gestuurd.</p><div class="actions"><button class="primary" type="submit">Herstelbericht in wachtrij zetten</button>'+button('Concept bewaren','save-recovery-draft')+button('Editor sluiten','hide-recovery','text-button')+'</div></form>';
+        }
+        html += '</section>';
       }
       html += '<h2>'+escape(prepared?.profile.name || 'Ziekmelding')+'</h2><p class="intro">'+({active:'Actief op de server.',recovered:'Herstel vastgelegd op de server.',cancelled:'Geannuleerd op de server.'}[current.state])+'</p>';
       if(composing && current.state === 'active' && !state.pending) {
@@ -226,6 +237,7 @@ window.AutofeverBridge = (() => {
         html += '<p class="hint">'+(current.recipients.find(r => r.id===recipient.id)?.acknowledged?'Lezen expliciet bevestigd':'Lezen niet bevestigd')+'</p></section>';
       }
       if(current.recovery) html += '<h2 class="section-gap">Bericht bij herstel</h2><section class="editor-block"><p class="long">'+escape(current.recovery.message)+'</p><p class="hint">Ontvangers: '+escape(current.recovery.recipients.map(person).join(', '))+'</p></section>';
+      else if(current.state === 'recovered') html += '<p class="hint">Herstel vastgelegd. Er is geen herstelbericht in de wachtrij gezet.</p>';
       html += '<h2 class="section-gap">Hulp</h2>';
       if (!snap.tasks.length) html += '<p>Geen hulpvragen ingesteld.</p>';
       for(const task of snap.tasks) {

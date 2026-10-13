@@ -256,12 +256,12 @@ paths:
                 recovery_message: {type: [string, 'null'], maxLength: 10000}
                 recovery_recipients:
                   type: array
-                  minItems: 1
+                  minItems: 0
                   maxItems: 100
                   uniqueItems: true
                   items: {type: string, pattern: '^[A-Za-z0-9_-]{1,80}$'}
-                  description: Optional on recovery for compatibility; when supplied, every id must have an accepted initial illness notification. Omit to notify all eligible recipients. Cancellation requires an empty array or omission.
-              description: Recovery requires nonempty text and queues only to accepted initial recipients, optionally limited to a selected subset. Cancellation requires a null message. Repeating a terminal state does not create or replace recovery notices.
+                  description: Optional on recovery for compatibility; when supplied, every id must have an accepted initial illness notification. Omit to notify all eligible recipients; an explicit empty list closes without queuing a recovery notice. Cancellation requires an empty array or omission.
+              description: Recovery requires nonempty text and queues only to accepted initial recipients, optionally limited to a selected subset. An explicit empty recipient list records recovery without queuing a notice. Cancellation requires a null message. Repeating a terminal state does not create or replace recovery notices.
       responses:
         '200': {$ref: '#/components/responses/OwnerView'}
         '400': {$ref: '#/components/responses/Error'}

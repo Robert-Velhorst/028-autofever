@@ -114,7 +114,7 @@ The default message should disclose no more than necessary. A neutral formulatio
 
 ### 3. Recovery and return
 
-When illness mode is active, the user can review and edit a recovery or return notification before sending. The owner may select a subset of recipients whose original illness notification was accepted by the delivery service; no new recipients can be added at recovery time. Acceptance still does not prove delivery or reading. This flow should:
+When illness mode is active, the user can review and edit a recovery or return notification before sending. The owner may select a subset of recipients whose original illness notification was accepted by the delivery service; no new recipients can be added at recovery time. If no initial notification was accepted, the owner can record recovery without queuing a message. Acceptance still does not prove delivery or reading. This flow should:
 
 - reuse the recipients from the active illness episode;
 - permit recipient or message changes before sending;

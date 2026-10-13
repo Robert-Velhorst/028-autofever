@@ -72,7 +72,7 @@ class ReconcileTests(unittest.TestCase):
     def test_proven_nonacceptance_without_retry_allows_close_without_recovery_notice(self):
         self.uncertain()
         self.store.reconcile_job(self.decision(outcome='not_accepted'), apply=True)
-        self.store.close(self.owner, self.eid, 'recovered', 'Better')
+        self.store.close(self.owner, self.eid, 'recovered', 'Better', recovery_recipients=[])
         self.assertEqual(len(self.jobs()), 1)
         self.assertEqual(self.jobs()[0]['status'], 'failed')
 

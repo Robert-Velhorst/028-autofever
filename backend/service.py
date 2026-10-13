@@ -674,12 +674,12 @@ class Store(RecordCodec):
         if state == 'recovered':
             text(recovery_message, 10000)
             if recovery_recipients is not None:
-                if not isinstance(recovery_recipients, list) or not recovery_recipients or len(recovery_recipients) > 100:
-                    raise Invalid('Choose one or more unique recovery recipients')
+                if not isinstance(recovery_recipients, list) or len(recovery_recipients) > 100:
+                    raise Invalid('Choose unique recovery recipients')
                 for recipient in recovery_recipients:
                     text(recipient, 80, identifier=True)
                 if len(set(recovery_recipients)) != len(recovery_recipients):
-                    raise Invalid('Choose one or more unique recovery recipients')
+                    raise Invalid('Choose unique recovery recipients')
         elif recovery_recipients not in (None, []):
             raise Invalid('Cancellation cannot select recovery recipients')
         with self.transaction() as db:
@@ -694,7 +694,7 @@ class Store(RecordCodec):
                 value = self.open(eid, row['data'])
                 informed = {x[0] for x in db.execute("SELECT recipient FROM jobs WHERE episode=? AND kind='illness' AND status='accepted'", (eid,))}
                 selected = informed if recovery_recipients is None else set(recovery_recipients)
-                if recovery_recipients is not None and (not selected or not selected <= informed):
+                if recovery_recipients is not None and not selected <= informed:
                     raise Conflict('Recovery recipients must have an accepted initial notification')
                 for recipient in value['recipients']:
                     if recipient['id'] in selected:

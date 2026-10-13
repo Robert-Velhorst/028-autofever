@@ -78,7 +78,7 @@ async (page) => {
       if(path.endsWith('/episode-closures')) {
         const body=request.postDataJSON();
         episode.state=body.state;
-        episode.recovery={message:body.recovery_message,recipients:body.recovery_recipients};
+        episode.recovery=body.recovery_recipients.length ? {message:body.recovery_message,recipients:body.recovery_recipients} : null;
         for(const recipient of body.recovery_recipients) episode.notifications.push({recipient,kind:'recovery',status:'queued'});
         return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:episode})});
       }
@@ -136,6 +136,15 @@ async (page) => {
     check(closureRequests[0].recovery_message==='Glad to be back. Thanks for your help!','Custom recovery message was not preserved');
     check(JSON.stringify(closureRequests[0].recovery_recipients)===JSON.stringify(['maya']),'Recovery recipients did not respect the explicit subset');
     check(episode.notifications.filter(item=>item.kind==='recovery').map(item=>item.recipient).join(',')==='maya','A nonselected person received a recovery notice');
+    episode.state='active';
+    episode.recovery=null;
+    episode.notifications=episode.notifications.filter(item=>item.kind!=='recovery').map(item=>({...item,status:'failed'}));
+    await app.getByRole('button',{name:'Refresh server status',exact:true}).click();
+    await app.getByRole('button',{name:'I have recovered',exact:true}).click();
+    await app.getByRole('button',{name:'Record recovery without a message',exact:true}).click();
+    await app.getByText('Recovery recorded. No recovery notice was queued.',{exact:true}).waitFor();
+    check(closureRequests.length===2&&closureRequests[1].recovery_recipients.length===0,'No-notice recovery did not send an explicit empty recipient set');
+    check(episode.notifications.every(item=>item.kind!=='recovery'),'No recovery notice should be queued when no initial notice was accepted');
     check(errors.length===0,`Browser errors: ${errors.join(' | ')}`);
     for(const width of [320,390,1280]) {
       await app.setViewportSize({width,height:844});
