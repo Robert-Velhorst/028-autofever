@@ -37,6 +37,25 @@ jobs:
       - name: Run backend tests
         run: python -W error::ResourceWarning -m unittest discover -s backend/tests -q
 
+  isolated-container:
+    name: Isolated Linux test container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build pinned, test-only image
+        run: docker build --pull --file deploy/Dockerfile.test --tag autofever-tests:ci .
+
+      - name: Run tests without network, host mounts, or writable root
+        run: >-
+          docker run --rm --network none --read-only
+          --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777
+          --cap-drop ALL --security-opt no-new-privileges
+          --memory 512m --cpus 2
+          autofever-tests:ci
+
   mobile-preview:
     name: Mobile browser tests (Windows)
     runs-on: windows-latest
