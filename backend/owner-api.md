@@ -2,6 +2,8 @@
 
 This is an opt-in development path, **not deployed production authentication**. Start the loopback listener with `--with-owner` and visit `/owner`. Without this option all owner routes and assets are absent. `/help` remains the separate recipient page. The same local-server restrictions in [README](README.md) apply: no port forwarding, public reverse proxy or production credentials.
 
+The same owner interface and capability contract are also used by the separate [hosted entry point](../deploy/README.md), which adds authenticated proxy checks and rate limits. That path is tested locally but not deployed. The local instructions below do not authorize exposing the development listener.
+
 ## Setup and authority
 
 A trusted operator supplies a dedicated store and calls `Store.create_owner()` once to provision a private owner capability. This returns the raw capability once; only its hash is stored in the owners table. Transfer it privately. Do not put it in a URL, Git, shared logs or screenshots. The browser's **Instellingen → Lokale server koppelen** form checks it against the configured same-origin server before storing it. No email/password account or recipient login is introduced. Friendly provisioning/recovery remains required production work.

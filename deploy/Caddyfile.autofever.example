@@ -1,0 +1,18 @@
+# Merge only this site's block into the existing proxy after host review.
+# Never replace the existing Hire.ai Caddyfile with this example.
+# Supply AUTOFEVER_HOST and AUTOFEVER_PROXY_KEY privately to Caddy.
+{$AUTOFEVER_HOST} {
+	# No access log directive. Audit global error/access logging before cutover.
+	header Strict-Transport-Security "max-age=31536000"
+	request_body {
+		max_size 2097152
+	}
+	respond /_health 404
+	redir / /owner 302
+	reverse_proxy 127.0.0.1:28028 {
+		header_up Host {$AUTOFEVER_HOST}
+		header_up X-Autofever-Proxy-Key {$AUTOFEVER_PROXY_KEY}
+		header_up X-Autofever-Proto {scheme}
+		header_up X-Autofever-Client-IP {remote_host}
+	}
+}

@@ -1,0 +1,40 @@
+# Review paths, user, port and limits against the existing host before installing.
+[Unit]
+Description=028-autofever private web service
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=autofever
+Group=autofever
+WorkingDirectory=/opt/028-autofever/current
+EnvironmentFile=/etc/028-autofever/web.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=store-key:/etc/028-autofever/store-key
+LoadCredential=proxy-key:/etc/028-autofever/proxy-key
+ExecStart=/opt/028-autofever/current/backend/.venv/bin/python -m backend.hosted --database /var/lib/028-autofever/state.sqlite3 --key-file ${CREDENTIALS_DIRECTORY}/store-key --proxy-key-file ${CREDENTIALS_DIRECTORY}/proxy-key --origin ${AUTOFEVER_ORIGIN} --port 28028 --serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/028-autofever
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=32
+LimitNOFILE=512
+
+[Install]
+WantedBy=multi-user.target

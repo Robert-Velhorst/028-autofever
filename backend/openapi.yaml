@@ -1,19 +1,22 @@
 openapi: 3.1.0
 info:
-  title: Autofever local lifecycle API
-  version: 0.2.0
+  title: Autofever lifecycle API
+  version: 0.3.0
   description: |
-    Local development boundary only. Not deployed or connected to a provider.
+    Local development or explicit hosted HTTPS-proxy boundary. Not deployed or connected to a provider.
     Every request requires the exact configured Host. POST additionally requires
     the exact configured Origin. Cross-site API requests and all query strings
     are rejected. No cookies, CORS or public provisioning. Owner routes require
-    the opt-in local owner app; recipient-only mode returns 404 for those routes.
+    the opt-in local owner app or HostedApp; recipient-only mode returns 404 for those routes.
     Duplicate JSON keys and unknown body fields are rejected; body limit 8192 bytes
     except owner profile activation (2 MiB).
     Successful POST responses contain a fresh view; repeat acknowledgment and
     repeating one's own accepted/completed action are safe. Concurrent episode
     closure may yield 404 even when an earlier mutation committed: re-read, do not
-    infer rollback from a failed response. No production rate limiting yet.
+    infer rollback from a failed response. HostedApp adds bounded per-process
+    global, client-IP and bearer quotas (429, Retry-After 60); development mode does not.
+    HostedApp requires authenticated loopback proxy headers injected by the trusted edge,
+    not by browser clients. The configured public origin is not yet deployed.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -30,6 +33,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Unavailable'}
         '405': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/owner/episodes:
     post:
@@ -63,6 +67,7 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/owner/episode-closures:
     post:
@@ -92,6 +97,7 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/recipient:
     get:
@@ -104,6 +110,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Unavailable'}
         '405': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/recipient/acknowledgment:
     post:
@@ -126,6 +133,7 @@ paths:
         '405': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/recipient/task-responses:
     post:
@@ -153,6 +161,7 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
 components:
   securitySchemes:
@@ -340,6 +349,14 @@ components:
           schema: {$ref: '#/components/schemas/Error'}
     Unavailable:
       description: Identical response for missing, unknown, expired, closed or unauthorized capability/resource.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    RateLimited:
+      description: HostedApp quota exceeded before performing an application mutation.
+      headers:
+        Retry-After:
+          schema: {type: string, const: '60'}
       content:
         application/json:
           schema: {$ref: '#/components/schemas/Error'}

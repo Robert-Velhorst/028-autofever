@@ -83,7 +83,7 @@ Protocol references: [Python SMTP client documentation](https://docs.python.org/
 ## Before any external sending
 
 1. Authorize the actual provider/account, sender identity and allowed recipients. Check any costs or service commitments separately; none has been approved or incurred here.
-2. Finish the production HTTP/HTTPS transport and deploy Autofever separately on the existing `013-hire-ai` host. The current local listener intentionally refuses public origins. Do not publish/forward it or weaken those guards to make an email link work.
+2. Qualify the [separate hosted transport](../deploy/README.md) and deploy Autofever separately on the existing `013-hire-ai` host. The development listener intentionally refuses public origins. Do not publish/forward it or weaken those guards to make an email link work. The hosted entry point and Linux tests are implemented, but actual public HTTPS and shared-host acceptance remain unverified.
 3. Verify the real public `/help` URL, capability expiry, TLS, recipient privacy and mobile behavior. `help_origin` validation checks syntax only; it cannot prove a deployed app exists.
 4. Verify the chosen provider's authentication, domain authorization, limits and security requirements. There is no automatic DNS modification or provider signup.
 5. Perform a separately authorized test to an approved real address and inspect actual receipt, failures and recovery. Local SMTP tests are not that proof.

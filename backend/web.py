@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from backend.service import Conflict, Denied, Invalid
+from backend.origins import https_origin
 
 
 ASSETS = {
@@ -32,6 +33,7 @@ ERRORS = {
     409: ('conflict', 'De gegevens zijn intussen gewijzigd. Haal de actuele stand op.'),
     413: ('too_large', 'Verzoek te groot.'),
     415: ('unsupported_media_type', 'JSON vereist.'),
+    429: ('rate_limited', 'Te veel verzoeken. Wacht even en probeer opnieuw.'),
     503: ('temporarily_unavailable', 'Tijdelijk niet beschikbaar. Probeer later opnieuw.'),
 }
 
@@ -51,12 +53,17 @@ def unique_object(pairs):
 
 
 class RecipientApp:
-    def __init__(self, store, origin):
+    def __init__(self, store, origin, *, https_proxy=False):
         parsed = urlsplit(origin)
-        if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or
+        if type(https_proxy) is not bool:
+            raise ValueError('Explicit transport mode required')
+        if https_proxy:
+            https_origin(origin)
+        elif (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or
                 not parsed.port or origin != f'http://127.0.0.1:{parsed.port}'):
             raise ValueError('This local transport requires an exact IPv4 loopback origin with port')
         self.store, self.origin, self.host = store, origin, parsed.netloc
+        self.https_proxy = https_proxy
         self.routes = dict(ROUTES)
         self.csp = ("default-src 'none'; script-src 'self'; style-src 'self'; "
                     "connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -87,6 +94,8 @@ class RecipientApp:
                 extra.append(('Allow', self.routes.get(env.get('PATH_INFO'), 'GET')))
             if status == 503:
                 extra.append(('Retry-After', '5'))
+            if status == 429:
+                extra.append(('Retry-After', '60'))
         headers = [
             ('Content-Type', mime), ('Content-Length', str(len(body))),
             ('Cache-Control', 'no-store'), ('Referrer-Policy', 'no-referrer'),
@@ -99,13 +108,15 @@ class RecipientApp:
         return [body]
 
     def handle(self, env):
+        if self.https_proxy and env.get('autofever.verified_proxy') is not True:
+            raise RequestError(403)
         if env.get('HTTP_HOST') != self.host:
             raise RequestError(403)
         origin = env.get('HTTP_ORIGIN')
         if origin and origin != self.origin:
             raise RequestError(403)
         path, method = env.get('PATH_INFO'), env.get('REQUEST_METHOD')
-        navigation = (path == '/help' and method == 'GET' and
+        navigation = (path in ('/help', '/owner') and path in self.assets and method == 'GET' and
                       env.get('HTTP_SEC_FETCH_MODE') == 'navigate' and
                       env.get('HTTP_SEC_FETCH_DEST') == 'document')
         if env.get('HTTP_SEC_FETCH_SITE') == 'cross-site' and not navigation:

@@ -1,0 +1,14 @@
+# Test-only Linux image. No production secrets, ports, volumes or mail provider.
+FROM python:3.11-slim-bookworm@sha256:0a310eeecf4e1f5a0743f9a6520c90c88d089c903ca5fd283f501e3a805f5f89
+WORKDIR /app
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN python -m pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/*.py /app/backend/
+COPY backend/smtp.example.json /app/backend/
+COPY backend/tests/*.py /app/backend/tests/
+COPY backend/static/*.js backend/static/*.css backend/static/*.html backend/static/*.svg /app/backend/static/
+COPY illness-preview/index.html /app/illness-preview/index.html
+RUN useradd --uid 1028 --create-home autofever-test
+USER 1028:1028
+ENV PYTHONDONTWRITEBYTECODE=1
+CMD ["python", "-W", "error::ResourceWarning", "-m", "unittest", "discover", "-s", "backend/tests", "-q"]

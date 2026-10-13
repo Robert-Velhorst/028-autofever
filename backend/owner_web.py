@@ -16,8 +16,8 @@ OWNER_ROUTES = {
 
 
 class OwnerApp(RecipientApp):
-    def __init__(self, store, origin):
-        super().__init__(store, origin)
+    def __init__(self, store, origin, *, https_proxy=False):
+        super().__init__(store, origin, https_proxy=https_proxy)
         self.routes.update(OWNER_ROUTES)
         root = Path(__file__).parent
         html = (root.parent / 'illness-preview/index.html').read_text(encoding='utf-8')
