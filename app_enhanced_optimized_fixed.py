@@ -894,4 +894,5 @@ def create_app():
 # Run the application
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Historical prototype only: keep its unauthenticated routes on loopback.
+    app.run(host='127.0.0.1', port=5000, debug=False)
