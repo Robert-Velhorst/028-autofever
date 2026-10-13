@@ -65,8 +65,25 @@ TLS runtime, build tools, unrelated historical prototype dependencies or unknown
 vulnerabilities. No custom exploit/timing/DoS reproducer was run for the upstream
 bugs. Remediation evidence is the vendor's patched release, installed version,
 advisory-range checks and the before/after audit—not a claim that every exploit
-was reproduced locally. Alerts are not manually dismissed; GitHub's indexing
-state must be checked after publishing the new pin.
+was reproduced locally. The GitHub fixed state was verified after publication;
+none of the four alerts was manually dismissed.
+
+## GitHub Dependabot status
+
+Read directly from `GET /repos/Robert-Velhorst/028-autofever/dependabot/alerts`
+on **13 October 2026**, GitHub returned `state: fixed`, with non-null `fixed_at`
+for all four findings after the updated default-branch manifest was indexed:
+
+| Alert | GitHub `fixed_at` (UTC) | First fixed version | Current pin |
+| --- | --- | --- | --- |
+| [#1 GHSA-537c-gmf6-5ccf](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/1) | 10:50:58 | 48.0.1 | 50.0.2 |
+| [#2 GHSA-g6cj-pr64-35w5](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/2) | 10:50:58 | 50.0.0 | 50.0.2 |
+| [#3 GHSA-jwv3-5hgf-82ww](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/3) | 10:50:59 | 49.0.0 | 50.0.2 |
+| [#4 GHSA-m2h6-j472-rp4c](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/4) | 10:50:59 | 49.0.0 | 50.0.2 |
+
+All four API records had `dismissed_at: null`. GitHub marked them fixed after
+seeing the patched requirement. That finding does not certify the application,
+host OS, container base image, production installation or future dependencies.
 
 ## Compatibility and regression evidence
 
