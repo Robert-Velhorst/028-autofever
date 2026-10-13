@@ -694,7 +694,7 @@ class Store(RecordCodec):
                 value = self.open(eid, row['data'])
                 informed = {x[0] for x in db.execute("SELECT recipient FROM jobs WHERE episode=? AND kind='illness' AND status='accepted'", (eid,))}
                 selected = informed if recovery_recipients is None else set(recovery_recipients)
-                if not selected or not selected <= informed:
+                if recovery_recipients is not None and (not selected or not selected <= informed):
                     raise Conflict('Recovery recipients must have an accepted initial notification')
                 for recipient in value['recipients']:
                     if recipient['id'] in selected:
