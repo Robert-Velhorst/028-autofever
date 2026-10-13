@@ -2,12 +2,23 @@
 window.AutofeverBridge = (() => {
   let ctx, state = {}, revision = 0, current = null, error = '', working = false, retentionDays = null;
   let composing = false, updateDraft = null, composingRecovery = false, recoveryDraft = null, retryTimer = null, retryEpoch = 0;
+  let ownerAccessCandidate = null;
   const retryDelays = [1000, 5000, 15000];
   const labels = {queued:'In wachtrij · niet verstuurd',sending:'Wordt aangeboden · uitkomst nog onbekend',accepted:'Aangenomen door de bezorgdienst · bezorging niet bevestigd',failed:'Niet verstuurd · mislukt',uncertain:'Verzenduitkomst onzeker · controle nodig',cancelled:'Geannuleerd · niet verstuurd'};
   const button = (label, action, cls='secondary') => '<button type="button" class="'+cls+'" data-owner-action="'+action+'">'+label+'</button>';
   const escape = value => ctx.esc(value);
   const confirmText = message => window.confirm(window.AutofeverLocale?.translate(message) || message);
   const ownerDeletePhrase = value => ['VERWIJDER MIJN SERVERGEGEVENS','DELETE MY SERVER DATA'].includes(value);
+  const accessPayload = value => {
+    if(!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'format,hours,token,version' || value.format !== 'autofever-owner-access' || value.version !== 1 || !/^[A-Za-z0-9_-]{43}$/.test(value.token) || !Number.isInteger(value.hours) || value.hours < 1 || value.hours > 168) throw {userMessage:'Dit is geen geldige Autofever-toegangsbackup.'};
+    return {token:value.token,hours:value.hours};
+  };
+  const decodeAccessEnvelope = value => {
+    if(!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'body,format,iterations,iv,kdf,salt,version' || value.format !== 'autofever-owner-access' || value.version !== 1 || value.kdf !== 'PBKDF2-SHA256' || value.iterations !== 600000) throw {userMessage:'Dit versleutelde toegangsbestand heeft een onbekend formaat.'};
+    const salt=ctx.from64(value.salt), iv=ctx.from64(value.iv), body=ctx.from64(value.body);
+    if(salt.length!==16 || iv.length!==12 || body.length<16 || body.length>48*1024) throw {userMessage:'Het versleutelde toegangsbestand is ongeldig of te groot.'};
+    return {salt,iv,body};
+  };
   const localizedDate = value => new Date(value * 1000).toLocaleString(window.AutofeverLocale?.get() === 'en' ? 'en-GB' : 'nl-NL');
 
   async function save(next) {
@@ -65,7 +76,7 @@ window.AutofeverBridge = (() => {
   async function run(operation) {
     if (working) return;
     working = true;
-    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-recovery input,#owner-recovery textarea,#owner-recovery button,#owner-export input,#owner-export button,#owner-retention input,#owner-retention button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
+    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-recovery input,#owner-recovery textarea,#owner-recovery button,#owner-export input,#owner-export button,#owner-access-export input,#owner-access-export button,#owner-access-restore input,#owner-access-restore button,#owner-retention input,#owner-retention button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
     try { error = ''; await operation(); }
     catch (exc) { error = failure(exc); }
     finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); schedulePendingRetry(); }
@@ -119,6 +130,25 @@ window.AutofeverBridge = (() => {
   }
   async function action(name) {
     await run(async () => {
+      if (name === 'clear-owner-access-candidate') {
+        ownerAccessCandidate = null;
+        ctx.say('Herstelvoorbereiding gewist. Er is niets opgeslagen of verstuurd.');
+        return;
+      }
+      if (name === 'restore-owner-access') {
+        if (!ownerAccessCandidate) throw {userMessage:'Controleer eerst een geldig versleuteld toegangsbestand.'};
+        if (state.pending) throw {userMessage:'Rond eerst de onzekere serveractie af voordat je een koppeling herstelt.'};
+        const candidate = structuredClone(ownerAccessCandidate);
+        const result = await api('episode', undefined, candidate.token);
+        const retention = await api('retention', undefined, candidate.token);
+        if(!retention || !(retention.retention_days===null || (Number.isInteger(retention.retention_days)&&retention.retention_days>=1&&retention.retention_days<=3650))) throw {userMessage:'De huidige server bevestigde de koppeling niet volledig. De bestaande koppeling is niet gewijzigd.'};
+        await save({token:candidate.token,hours:candidate.hours,pending:null});
+        current = result;
+        retentionDays = retention.retention_days;
+        ownerAccessCandidate = null;
+        ctx.say('Serverkoppeling hersteld op deze browser. Profielen en openstaande lokale acties zijn niet teruggezet.');
+        return;
+      }
       if (!state.token) throw {userMessage:'Koppel eerst de lokale server bij Jouw gegevens.'};
       if (name === 'refresh') return refresh();
       if (name === 'resolve') return submitPending();
@@ -279,6 +309,14 @@ window.AutofeverBridge = (() => {
     if (view !== 'settings') return;
     document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Automatische bewaartermijn</h2><p class="hint">Standaard staat dit uit. Kies alleen als je wilt dat oude, afgesloten ziekmeldingen en hun servergeschiedenis automatisch uit de live database verdwijnen. Actieve meldingen en berichten met een open, lopende of onzekere bezorgstatus worden nooit opgeruimd. Bewaartermijn werkt pas automatisch wanneer de beheerder de dagelijkse Autofever-opschoontaak op de server heeft ingeschakeld. Exports, serverback-ups en kopieën bij ontvangers vallen hier niet onder.</p><form id="owner-retention"><label for="owner-retention-days">Bewaar geschiedenis na afsluiten (dagen; leeg = uit)</label><input id="owner-retention-days" type="number" min="1" max="3650" step="1" value="'+escape(retentionDays ?? '')+'"'+(!state.token?' disabled':'')+'><p class="hint">1 tot 3650 dagen. Een kortere termijn kan bij de eerstvolgende dagelijkse opschoningsrun direct geschiedenis verwijderen.</p><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Bewaartermijn opslaan</button></div></form></section>');
     document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens exporteren</h2><p class="hint">Dit bevat je serverhistorie: ziekte- en herstelberichten, contactgegevens, helperstatus en check-ins. De download wordt eerst met een aparte wachtzin versleuteld. Bewaar die wachtzin los van het bestand. Dit exporteert niet je lokale profielen; gebruik daarvoor de gewone Autofever-back-up.</p><form id="owner-export"><label for="owner-export-password">Wachtzin voor de serverexport</label><input id="owner-export-password" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><label for="owner-export-confirm">Herhaal de wachtzin</label><input id="owner-export-confirm" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><p class="hint">Minstens 14 tekens. De wachtzin wordt niet opgeslagen of naar de server gestuurd.</p><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Versleutelde serverexport downloaden</button></div></form></section><section class="section-gap"><h2>Lokale server koppelen</h2><p class="hint">Eenmalige privésleutel van de beheerder, geen nieuw account. Alleen deze server op dit adres. Bewaar de sleutel apart; de profielback-up bevat hem niet. De sleutel wordt hier versleuteld opgeslagen, met de browsersleutel op hetzelfde apparaat.</p>'+(state.token?'<p class="hint">Koppeling bewaard. Verlopen hulplinks sluiten na '+escape(state.hours)+' uur.</p>':'')+'<form id="owner-connect"><label for="owner-token">Privésleutel voor jouw meldingen</label><input id="owner-token" type="password" autocomplete="off" maxlength="43" required><label for="owner-hours">Geldigheid hulplink in uren</label><input id="owner-hours" type="number" min="1" max="168" value="'+escape(state.hours||24)+'" required><div class="actions"><button class="primary" type="submit">Koppeling controleren en bewaren</button></div></form><p class="hint">Terugzetten van een profielback-up wijzigt geen lopende servermelding. Meerdere kanalen per persoon en push zijn nog niet aangesloten; kies voor deze koppeling één beginkanaal.</p></section>');
+    document.querySelector('#owner-connect').closest('section').insertAdjacentHTML('afterend',
+      '<section class="section-gap"><h2>Serverkoppeling meenemen of herstellen</h2>'+
+      '<p class="hint">Deze aparte herstelbackup bevat alleen je toegangssleutel en hulplinkduur; geen profielen, contacten, serverhistorie of openstaande acties. Versleutel hem met een sterke wachtzin en bewaar bestand en wachtzin apart. De wachtzin wordt niet opgeslagen of naar de server gestuurd.</p>'+
+      '<p class="hint">Controleer bij terugzetten het adres in je browser: de sleutel wordt alleen gecontroleerd bij de Autofever-server die je nu hebt geopend. Terugzetten trekt een oud of verloren apparaat niet in. Vraag de vertrouwde beheerder om de sleutel te vervangen als een apparaat kwijt of gestolen is.</p>'+
+      '<form id="owner-access-export"><label for="owner-access-export-password">Wachtzin voor toegangsbackup</label><input id="owner-access-export-password" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><label for="owner-access-export-confirm">Herhaal de wachtzin</label><input id="owner-access-export-confirm" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Versleutelde toegangsbackup downloaden</button></div></form>'+
+      '<form id="owner-access-restore"><label for="owner-access-file">Versleuteld .afaccess-bestand</label><input id="owner-access-file" type="file" accept=".afaccess,application/json" required><label for="owner-access-restore-password">Wachtzin van de toegangsbackup</label><input id="owner-access-restore-password" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><div class="actions"><button class="secondary" type="submit">Toegangsbackup controleren</button></div></form>'+
+      (ownerAccessCandidate?'<div class="editor-block" role="status"><p>Bestand ontgrendeld. Dit herstelt toegang bij <strong>'+escape(location.origin)+'</strong>. Er is nog geen serververzoek gedaan.</p>'+(state.token?'<p class="hint">Na bevestigen wordt de huidige serverkoppeling in deze browser vervangen.</p>':'')+'<div class="actions">'+button('Koppeling herstellen op deze server','restore-owner-access','primary')+button('Voorbereiding wissen','clear-owner-access-candidate','text-button')+'</div></div>':'<div id="owner-access-restore-preview" aria-live="polite"></div>')+
+      '</section>');
     document.querySelector('#owner-export').closest('section').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens wissen</h2><p class="hint">Dit verwijdert je live serverhistorie: ziekte- en herstelteksten, contactgegevens, helpers, check-ins en de berichtenwachtrij. Klaarstaande berichten worden verwijderd; eerder bezorgde berichten kunnen niet worden teruggehaald. Je lokale profielen en serverkoppeling blijven bewaard. Gegevens in operatorback-ups of bij ontvangers worden niet door deze actie gewist.</p><form id="owner-data-delete"><label for="owner-data-delete-confirm">Typ VERWIJDER MIJN SERVERGEGEVENS om te bevestigen</label><input id="owner-data-delete-confirm" type="text" autocomplete="off" maxlength="64" required><p class="hint">Niet mogelijk zolang een verzending bezig is of een provideruitkomst onzeker is; die moet eerst worden opgelost.</p><div class="actions"><button class="text-button" type="submit"'+(!state.token?' disabled':'')+'>Alle servergegevens verwijderen</button></div></form></section>');
   }
   document.addEventListener('click', event => {
@@ -373,6 +411,50 @@ window.AutofeverBridge = (() => {
         const blob=new Blob([JSON.stringify(envelope)],{type:'application/json'}), url=URL.createObjectURL(blob), link=document.createElement('a');
         link.href=url;link.download='autofever-server-'+new Date().toISOString().slice(0,10)+'.afexport';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
         event.target.reset();ctx.say('Versleutelde serverexport aangeboden als download. Bewaar de wachtzin apart.');
+      });
+      return;
+    }
+    if(event.target.id === 'owner-access-export' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const form=event.target;
+      run(async () => {
+        try {
+          if(!state.token || state.pending) throw {userMessage:'Koppel eerst de server en los een eventuele onzekere actie op.'};
+          const password=document.getElementById('owner-access-export-password').value;
+          const confirm=document.getElementById('owner-access-export-confirm').value;
+          if(password.length<14 || password!==confirm) throw {userMessage:'Gebruik minstens 14 tekens en vul tweemaal dezelfde wachtzin in.'};
+          const payload={format:'autofever-owner-access',version:1,token:state.token,hours:state.hours};
+          const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+          const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv},await ctx.backupKey(password,salt),new TextEncoder().encode(JSON.stringify(payload)));
+          const envelope={format:'autofever-owner-access',version:1,kdf:'PBKDF2-SHA256',iterations:600000,salt:ctx.to64(salt),iv:ctx.to64(iv),body:ctx.to64(new Uint8Array(encrypted))};
+          const blob=new Blob([JSON.stringify(envelope)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');
+          link.href=url;link.download='autofever-toegang-'+new Date().toISOString().slice(0,10)+'.afaccess';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+          ctx.say('Versleutelde toegangsbackup aangeboden als download. Bewaar de wachtzin apart.');
+        } finally {form.reset();}
+      });
+      return;
+    }
+    if(event.target.id === 'owner-access-restore' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      const form=event.target;
+      run(async () => {
+        try {
+          const file=document.getElementById('owner-access-file').files[0];
+          const password=document.getElementById('owner-access-restore-password').value;
+          if(!file || !file.name.toLowerCase().endsWith('.afaccess') || file.size<1 || file.size>64*1024) throw {userMessage:'Kies een geldig .afaccess-bestand van maximaal 64 KB.'};
+          if(password.length<14 || password.length>1024) throw {userMessage:'Vul de wachtzin van minstens 14 tekens in.'};
+          let envelope;
+          try { envelope=JSON.parse(await file.text()); } catch { throw {userMessage:'Het toegangsbestand is geen leesbare back-up.'}; }
+          const {salt,iv,body}=decodeAccessEnvelope(envelope);
+          let plaintext;
+          try { plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv},await ctx.backupKey(password,salt),body); }
+          catch { throw {userMessage:'Bestand of wachtzin klopt niet. Er is niets opgeslagen of naar een server gestuurd.'}; }
+          ownerAccessCandidate=accessPayload(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plaintext)));
+          ctx.say('Bestand gecontroleerd. Controleer het serveradres en bevestig apart om de koppeling te herstellen. Er is nog geen serververzoek gedaan.');
+        } catch(exc) {
+          if(exc.userMessage) throw exc;
+          throw {userMessage:'De toegangsbackup kon niet veilig worden gelezen. Er is niets opgeslagen of verstuurd.'};
+        } finally {form.reset();}
       });
       return;
     }

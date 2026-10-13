@@ -29,6 +29,17 @@ authenticates the file but does not conceal it. Do not publish the file, put its
 contents in a URL, paste it into a shared terminal/chat, or attach it to a support
 issue. The CLI never prints the code, key or artifact contents.
 
+The owner settings can create a different, encrypted `.afaccess` browser backup.
+It contains only the owner's capability and helper-link duration, not profiles,
+contacts, server history or pending local actions. Restore it only after opening
+the intended Autofever server; check the displayed origin and explicitly confirm
+before the browser makes read-only requests to validate the capability and save
+it locally. Decrypting/checking the file alone makes no server request. This does
+not revoke a lost device's access. The file and its strong passphrase should be
+kept separately. For a lost or stolen device, a trusted operator still needs to
+rotate the capability; the owner UI cannot perform that operation or verify
+identity.
+
 ## Prerequisites and paths
 
 - Use the configured backend Python environment from [backend setup](README.md).

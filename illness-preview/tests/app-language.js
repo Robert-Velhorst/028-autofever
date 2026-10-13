@@ -66,7 +66,7 @@ async (page) => {
     await app.route('**/backend/static/owner-bridge.js',route=>route.fulfill({status:200,contentType:'text/javascript',body:bridge}));
     await app.route('**/api/v1/owner/**',async route=>{
       const request=route.request(),path=new URL(request.url()).pathname;
-      responses.push({path,method:request.method()});
+      responses.push({path,method:request.method(),authorized:request.headers()['authorization']==='Bearer '+'A'.repeat(43)});
       if(path.endsWith('/episode')) return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:episode})});
       if(path.endsWith('/retention')) return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{retention_days:null}})});
       if(path.endsWith('/episode-updates')) {
@@ -145,11 +145,56 @@ async (page) => {
     await app.getByText('Recovery recorded. No recovery notice was queued.',{exact:true}).waitFor();
     check(closureRequests.length===2&&closureRequests[1].recovery_recipients.length===0,'No-notice recovery did not send an explicit empty recipient set');
     check(episode.notifications.every(item=>item.kind!=='recovery'),'No recovery notice should be queued when no initial notice was accepted');
+
+    // A separately encrypted access backup must be inert until an explicit restore.
+    await app.getByRole('button',{name:'Switch language to Dutch',exact:true}).click();
+    await app.getByRole('button',{name:'Instellingen',exact:true}).click();
+    await app.locator('#owner-access-export-password').fill('Synthetic passphrase 2026');
+    await app.locator('#owner-access-export-confirm').fill('Synthetic passphrase 2026');
+    await app.evaluate(()=>{
+      const original=URL.createObjectURL.bind(URL);
+      URL.createObjectURL=blob=>{window.__autofeverAccessBackup=blob.text();return original(blob);};
+    });
+    const beforeExport=responses.length;
+    const [download]=await Promise.all([
+      app.waitForEvent('download'),
+      app.locator('#owner-access-export button[type="submit"]').click()
+    ]);
+    check(download.suggestedFilename().endsWith('.afaccess'),'Owner access backup did not use the .afaccess extension');
+    const accessEnvelopeText=await app.evaluate(()=>window.__autofeverAccessBackup);
+    const accessEnvelope=JSON.parse(accessEnvelopeText);
+    check(accessEnvelope.format==='autofever-owner-access'&&accessEnvelope.version===1&&accessEnvelope.kdf==='PBKDF2-SHA256','Access backup envelope metadata is invalid');
+    check(!accessEnvelopeText.includes('A'.repeat(43)),'Plain owner capability appeared in the access backup envelope');
+    check(responses.length===beforeExport,'Exporting access metadata made an unexpected server request');
+
+    await app.evaluate(()=>new Promise((resolve,reject)=>{
+      const request=indexedDB.open('autofever-editable-preview-v1');
+      request.onerror=()=>reject(request.error);
+      request.onsuccess=()=>{const tx=request.result.transaction('vault','readwrite');tx.objectStore('vault').delete('connection');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);};
+    }));
+    await app.reload();
+    await app.getByRole('button',{name:'Instellingen',exact:true}).click();
+    await app.getByRole('heading',{name:'Jouw gegevens.'}).waitFor();
+    const requestCountBeforeImport=responses.length;
+    await app.locator('#owner-access-file').setInputFiles({name:'recovery.afaccess',mimeType:'application/json',buffer:Buffer.from(accessEnvelopeText)});
+    await app.locator('#owner-access-restore-password').fill('Incorrect synthetic phrase');
+    await app.locator('#owner-access-restore button[type="submit"]').click();
+    await app.getByText('Bestand of wachtzin klopt niet. Er is niets opgeslagen of naar een server gestuurd.',{exact:true}).waitFor();
+    check(responses.length===requestCountBeforeImport,'Wrong passphrase triggered a server request');
+    await app.locator('#owner-access-file').setInputFiles({name:'recovery.afaccess',mimeType:'application/json',buffer:Buffer.from(accessEnvelopeText)});
+    await app.locator('#owner-access-restore-password').fill('Synthetic passphrase 2026');
+    await app.locator('#owner-access-restore button[type="submit"]').click();
+    await app.getByText('Bestand gecontroleerd. Controleer het serveradres en bevestig apart om de koppeling te herstellen. Er is nog geen serververzoek gedaan.',{exact:true}).waitFor();
+    check(responses.length===requestCountBeforeImport,'Decrypting a valid file contacted the server before confirmation');
+    await app.getByRole('button',{name:'Koppeling herstellen op deze server',exact:true}).click();
+    await app.getByText('Serverkoppeling hersteld op deze browser. Profielen en openstaande lokale acties zijn niet teruggezet.',{exact:true}).waitFor();
+    check(responses.length===requestCountBeforeImport+2,'Explicit restore did not make exactly the two read-only verification requests');
+    check(responses.slice(-2).every(item=>item.method==='GET'&&item.authorized&&(item.path.endsWith('/episode')||item.path.endsWith('/retention'))),'Access restore did not make only authorized, read-only verification requests');
     check(errors.length===0,`Browser errors: ${errors.join(' | ')}`);
     for(const width of [320,390,1280]) {
       await app.setViewportSize({width,height:844});
       check(await app.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Horizontal overflow at ${width}px`);
     }
-    return 'PASS: profile/settings localization, encrypted reconnect retry, editable recovery text and recipient subset, no premature acceptance, privacy and mobile widths';
+    return 'PASS: profile/settings localization, encrypted reconnect retry, access backup and explicit same-origin restore, editable recovery text and recipient subset, no premature acceptance, privacy and mobile widths';
   } finally { await context.close(); }
 }
