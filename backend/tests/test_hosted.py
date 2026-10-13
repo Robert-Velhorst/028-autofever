@@ -166,7 +166,13 @@ class HostedTests(unittest.TestCase):
 
     def test_real_waitress_transport_accepts_only_proxy_contract(self):
         server = make_hosted_server(self.app, 0)
-        worker = threading.Thread(target=server.run, daemon=True)
+        thread_errors = []
+        def run():
+            try:
+                server.run()
+            except BaseException as error:
+                thread_errors.append(error)
+        worker = threading.Thread(target=run, daemon=True)
         worker.start()
         def call(path, *, headers=None, method='GET', body=None, read_body=True):
             connection = http.client.HTTPConnection('127.0.0.1', int(server.effective_port), timeout=5)
@@ -194,12 +200,17 @@ class HostedTests(unittest.TestCase):
             self.assertEqual(call('/api/v1/owner/episodes', headers={**write_headers, 'Content-Length':str(2*1024*1024+1)},
                                   method='POST', body=b'')[0], 413)
         finally:
-            server.close()
             server.task_dispatcher.shutdown()
-            # No keepalive clients remain; close residual asyncore channels if any.
-            server.asyncore.close_all(server._map)
+            # Closing sockets concurrently with select() can raise WinError 10038.
+            # Waitress's trigger runs this callback in its own event-loop thread.
+            # Keep the real server.run() path and surface any thread failures.
+            if worker.is_alive():
+                server.trigger.pull_trigger(lambda: server.asyncore.close_all(server._map))
             worker.join(timeout=5)
             self.assertFalse(worker.is_alive())
+            server.close()
+            server.asyncore.close_all(server._map)
+            self.assertEqual(thread_errors, [])
 
 
 if __name__ == '__main__': unittest.main()

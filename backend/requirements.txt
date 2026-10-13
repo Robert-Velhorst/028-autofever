@@ -1,2 +1,2 @@
-cryptography==46.0.7
+cryptography==50.0.2
 waitress==3.0.2

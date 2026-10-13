@@ -14,6 +14,8 @@ python -m venv backend/.venv
 
 On Linux, the environment's Python executable is `backend/.venv/bin/python`. The direct cryptography dependency is pinned; this is not yet a complete cross-platform deployment lockfile. Tests create disposable SQLite files and synthetic recipients under `.invalid`, generate only test capabilities, and use injected sender functions or temporary loopback TLS SMTP servers. The HTTP integration test also uses an ephemeral loopback listener. No tests contact external providers or read the mobile preview's browser database.
 
+The backend's tested platforms are 64-bit Windows and Linux. The [cryptography security upgrade](dependency-security.md) pins 50.0.2, audits the exact runtime dependencies and verifies compatibility with synthetic records/backups created under 46.0.7. That upstream upgrade no longer supports 32-bit Windows or x86_64 macOS. Platform test counts and remaining deployment gates are maintained in [deployment verification](../deploy/README.md#local-and-linux-verification).
+
 ## Implemented boundary
 
 `backend.service.Store` is the authoritative in-process interface. HTTP routes are documented in [OpenAPI](openapi.yaml), with the optional owner flow explained in [the owner contract](owner-api.md). [Private setup commands](provisioning.md) now generate new keys/stores and provide resumable owner enrollment with a private credential file. Provisioning and dispatch remain trusted local operations with no HTTP routes.
