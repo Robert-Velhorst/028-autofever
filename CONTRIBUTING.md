@@ -33,5 +33,7 @@ status board are not yet normalized; do not treat those views as authoritative.
   lifecycle. Autofever belongs in its own `028-autofever` paths and state.
 
 `CODEOWNERS` requests review from the repository owner for the maintained app,
-service, deployment and workflow paths. GitHub branch protection and required
-code-owner review still need to be configured separately by a maintainer.
+service, deployment and workflow paths. A direct GitHub API check on 2026-10-14
+reported that `main` is not branch-protected. Required checks and code-owner
+review therefore are not enforced until an authorized maintainer configures
+branch protection separately.
