@@ -7,3 +7,4 @@
 *.afowner
 .autofever-provision-*/
 .playwright-cli/
+__pycache__/
