@@ -87,7 +87,7 @@ Protocol references: [Python SMTP client documentation](https://docs.python.org/
 3. Verify the real public `/help` URL, capability expiry, TLS, recipient privacy and mobile behavior. `help_origin` validation checks syntax only; it cannot prove a deployed app exists.
 4. Verify the chosen provider's authentication, domain authorization, limits and security requirements. There is no automatic DNS modification or provider signup.
 5. Perform a separately authorized test to an approved real address and inspect actual receipt, failures and recovery. Local SMTP tests are not that proof.
-6. Complete uncertain-send reconciliation, credential rotation, backup/restore, retention, monitoring and operator procedures. A failed or uncertain job is never reset by editing SQL to force another send. The current UI reports queue status but is not a live provider-configuration dashboard.
+6. Qualify the [private uncertain-send review procedure](reconciliation.md) with the chosen provider, including how to obtain authoritative evidence. Complete credential rotation, backup/restore, retention, monitoring and operator procedures. A failed or uncertain job is never reset by editing SQL to force another send. Explicit requeue through the review tool is allowed only after verified non-acceptance and still enforces attempt/expiry limits. The current UI reports queue status but is not a live provider-configuration dashboard.
 
 TLS secures the connection to the SMTP server, not end-to-end confidentiality. The provider and intended recipient can read message content and the personal link. Keep disclosures minimal; do not include a diagnosis unless deliberately configured by the user. Verify link handling in real email clients before production acceptance.
 

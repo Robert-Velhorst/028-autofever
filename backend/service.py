@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from backend.profile import compile_profile
+from backend.dispatch_lock import delivery_lock
 
 
 class Invalid(ValueError):
@@ -378,6 +379,12 @@ class Store:
             db.execute("UPDATE jobs SET status='uncertain' WHERE status='sending' AND lease<=?", (int(self.clock()),))
 
     def dispatch_one(self, sender, *, channels=None):
+        # Held across the provider call, but never a long-running SQL transaction.
+        # A lease expiry alone cannot make a still-running sender safe to reconcile.
+        with delivery_lock(self.path, timeout=10):
+            return self._dispatch_one(sender, channels=channels)
+
+    def _dispatch_one(self, sender, *, channels=None):
         """Call a trusted configured adapter once. Acceptance is not delivery.
 
         An adapter returns a nonempty receipt only on positive provider acceptance.
@@ -417,7 +424,86 @@ class Store:
         elif outcome == 'permanent':
             outcome = 'failed'
         with self.transaction() as db:
-            db.execute('UPDATE jobs SET status=?,due=?,receipt=?,lease=NULL WHERE id=? AND status IN (\'sending\',\'uncertain\')',
+            db.execute('UPDATE jobs SET status=?,due=?,receipt=?,lease=NULL WHERE id=? AND attempts=? AND status IN (\'sending\',\'uncertain\')',
                        (outcome, int(self.clock()) + min(3600, 30 * 2 ** (attempts - 1)),
-                        self.seal(row['id'] + ':receipt', receipt) if outcome == 'accepted' else None, row['id']))
+                        self.seal(row['id'] + ':receipt', receipt) if outcome == 'accepted' else None, row['id'], attempts))
         return True
+
+    def review_job(self, job_id):
+        """Trusted operator only: no message, destination, capability or receipt."""
+        text(job_id, 80, identifier=True)
+        with self.transaction() as db:
+            row = db.execute('SELECT j.id,j.episode,j.kind,j.status,j.attempts,j.due,j.lease,e.state AS episode_state '
+                             'FROM jobs j JOIN episodes e ON e.id=j.episode WHERE j.id=?', (job_id,)).fetchone()
+            if row is None:
+                raise Denied('Unavailable')
+            entries = db.execute('SELECT name,value FROM metadata WHERE name LIKE ? ORDER BY name',
+                                 ('resolution:' + job_id + ':%',)).fetchall()
+            return {**dict(row), 'resolutions': [
+                {key: value for key, value in self.open(entry['name'], entry['value']).items()
+                 if key in ('attempt', 'outcome', 'retry', 'result', 'recorded_at')}
+                for entry in entries]}
+
+    def reconcile_job(self, decision, *, apply=False):
+        """Trusted operator assertion of externally verified evidence, never a lookup.
+
+        No HTTP route. Dry-run by default. A decision can only settle one uncertain
+        attempt; identical replay is safe, changed evidence/decisions conflict.
+        """
+        fields = {'job_id', 'attempt', 'outcome', 'retry', 'operator', 'evidence_source', 'evidence_reference'}
+        if not isinstance(decision, dict) or set(decision) != fields or type(apply) is not bool:
+            raise Invalid('Invalid reconciliation fields')
+        job_id = text(decision['job_id'], 80, identifier=True)
+        attempt = decision['attempt']
+        if type(attempt) is not int or not 1 <= attempt <= 5:
+            raise Invalid('An exact attempt number is required')
+        if decision['outcome'] not in ('accepted', 'not_accepted') or type(decision['retry']) is not bool:
+            raise Invalid('Explicit evidence outcome and retry choice required')
+        if decision['retry'] and decision['outcome'] != 'not_accepted':
+            raise Invalid('Never retry an accepted or unresolved send')
+        if decision['evidence_source'] not in ('provider_record', 'provider_support'):
+            raise Invalid('Authoritative provider evidence is required')
+        for name, maximum in (('operator', 200), ('evidence_reference', 1000)):
+            text(decision[name], maximum)
+            if any(ord(c) < 32 or ord(c) == 127 for c in decision[name]):
+                raise Invalid('Use a single-line private evidence reference')
+        decision = json.loads(encoded(decision))
+        identity = f'resolution:{job_id}:{attempt}'
+        now = int(self.clock())
+        with delivery_lock(self.path), self.transaction() as db:
+            existing = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+            if existing is not None:
+                record = self.open(identity, existing['value'])
+                if record['decision'] != decision:
+                    raise Conflict('This attempt already has a different resolution')
+                return {'job_id': job_id, 'attempt': attempt, 'result': record['result'], 'applied': True, 'replayed': True}
+            row = db.execute('SELECT j.*,e.state AS episode_state FROM jobs j JOIN episodes e ON e.id=j.episode '
+                             'WHERE j.id=?', (job_id,)).fetchone()
+            if row is None:
+                raise Denied('Unavailable')
+            if row['attempts'] != attempt or row['status'] not in ('uncertain', 'sending'):
+                raise Conflict('Job state or attempt changed; review again')
+            if row['status'] == 'sending' and (row['lease'] is None or row['lease'] > now):
+                raise Conflict('Sending lease has not expired')
+            result = 'accepted' if decision['outcome'] == 'accepted' else 'failed'
+            if decision['retry']:
+                if attempt >= 5:
+                    raise Conflict('Retry limit reached')
+                if row['kind'] == 'illness':
+                    recipient = db.execute('SELECT expires FROM recipients WHERE episode=? AND recipient=?',
+                                           (row['episode'], row['recipient'])).fetchone()
+                    if row['episode_state'] != 'active' or recipient is None or recipient['expires'] <= now:
+                        raise Conflict('Cannot retry a closed episode or expired personal link')
+                elif row['episode_state'] != 'recovered':
+                    raise Conflict('Recovery episode state changed')
+                result = 'queued'
+            answer = {'job_id': job_id, 'attempt': attempt, 'result': result, 'applied': apply, 'replayed': False}
+            if not apply:
+                return answer
+            record = {'decision': decision, 'attempt': attempt, 'outcome': decision['outcome'],
+                      'retry': decision['retry'], 'result': result, 'recorded_at': now}
+            db.execute('INSERT INTO metadata(name,value) VALUES (?,?)', (identity, self.seal(identity, record)))
+            receipt = self.seal(job_id + ':receipt', 'operator-reconciled:' + identity) if result == 'accepted' else None
+            db.execute('UPDATE jobs SET status=?,due=?,lease=NULL,receipt=? WHERE id=?',
+                       (result, now + 30, receipt, job_id))
+            return answer

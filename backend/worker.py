@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 
 from backend.service import Invalid, Store
+from backend.dispatch_lock import DeliveryBusy
 from backend.smtp import SMTPConfig, SMTPSender
 
 
@@ -40,7 +41,12 @@ def run_worker(store, sender, *, max_jobs=1, stop=None, poll_seconds=5):
     while not stop.is_set() and (max_jobs is None or attempted < max_jobs):
         if sender.halted:
             raise Invalid('SMTP account or TLS configuration requires operator attention')
-        if store.dispatch_one(sender, channels=sender.channels):
+        try:
+            dispatched = store.dispatch_one(sender, channels=sender.channels)
+        except DeliveryBusy:
+            # Another process still owns dispatch; no job was claimed by us.
+            dispatched = False
+        if dispatched:
             attempted += 1
             if sender.halted:
                 raise Invalid('SMTP account or TLS configuration requires operator attention')

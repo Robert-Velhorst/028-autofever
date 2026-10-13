@@ -27,7 +27,7 @@ All supported preview fields are preserved: profile ID/name, general and per-per
 
 **Ik ben hersteld** uses the recovery text frozen with the active episode. Recovery closes the episode and queues a recovery notice only for recipients whose initial notice was positively accepted by the sender. Acceptance is not delivery or reading. **Gebeurtenis annuleren** closes without recovery notices. Both invalidate recipient access through episode state and close unfinished tasks.
 
-The closing request is persisted before submission. A lost response is reconciled against the latest episode after reload, or the identical terminal operation can be retried. A new illness episode is refused while prior outgoing work is queued/in flight/uncertain. Closing while a send is in flight or uncertain is also refused. Operator/provider reconciliation remains a required separate feature; never bypass this by editing SQL statuses. A definite 409 does not retain a misleading successful operation.
+The closing request is persisted before submission. A lost response is reconciled against the latest episode after reload, or the identical terminal operation can be retried. A new illness episode is refused while prior outgoing work is queued/in flight/uncertain. Closing while a send is in flight or uncertain is also refused. A [private operator tool](reconciliation.md) can settle an uncertain attempt using externally verified provider evidence; the owner bearer cannot invoke it. Refreshing then shows the resulting ordinary queue state. Unresolvable uncertainty and a nontechnical support flow remain required work; never bypass the guards by editing SQL statuses. A definite 409 does not retain a misleading successful operation.
 
 ## HTTP contract
 

@@ -3,4 +3,5 @@ tests/__pycache__/
 .venv/
 *.sqlite3
 *.sqlite3-*
+*.dispatch.lock
 .env
