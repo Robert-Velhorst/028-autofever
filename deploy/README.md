@@ -48,6 +48,8 @@ The **previous 98-case baseline**, before backup/recovery-copy changes, passed o
 
 The baseline uses cryptography 46.0.7, Waitress 3.0.2, cffi 2.1.1 and pycparser 3.11 on both platforms; dependencies are unchanged. The unchanged Caddy fragment previously passed `caddy validate` in an isolated container using image digest `sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f` and synthetic configuration. No public listener or real TLS certificate was created. The systemd template has not been installed or executed on the target host.
 
+**Open dependency release gate, verified via GitHub's alerts API on 13 October 2026:** `backend/requirements.txt` still pins `cryptography==46.0.7`. GitHub reports three high-severity alerts ([bundled OpenSSL](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/1), [PKCS#7 decryption](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/2), [certificate path building](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/3)) and one medium-severity alert ([wildcard certificate constraints](https://github.com/Robert-Velhorst/028-autofever/security/dependabot/4)). The reported first fixed versions are respectively 48.0.1, 50.0.0, 49.0.0 and 49.0.0. Updating to a compatible patched release and rerunning regression/security checks remain required; these alerts have not been dismissed or fixed by the provisioning change. `pip check` tests dependency consistency, not vulnerability freedom. Runtime exploitability has not yet been assessed, and this is not production security clearance.
+
 Windows tests from the repository root:
 
 ```powershell
