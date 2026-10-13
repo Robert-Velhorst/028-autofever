@@ -12,6 +12,7 @@ The preview does not send messages, create reminder jobs, contact backup helpers
 
 - Mobile layout with four collapsible profile sections: message, people, help and follow-up.
 - Contacts and profiles can be created, edited and removed. Optional individual messages show a preview of the effective message before saving.
+- Contacts can be imported from a local `.vcf` vCard file. The app previews names and available address choices, excludes detected duplicates, and requires an explicit import action. Importing does not select delivery channels or add contacts to any illness profile; both require later user choices. The file is parsed in the browser and is not uploaded by the import flow.
 - Profile, contact and update drafts are automatically stored separately from published settings. Navigation and reload preserve drafts; publishing or explicitly discarding a draft clears it.
 - The home screen shows recipient count and missing contact/task details. Email requires an email address; SMS and WhatsApp require a plausible phone number when a contact is saved. These are format checks, not proof that a destination exists or belongs to the person.
 - Help tasks record instructions, intended helpers, a timing description, once/daily/weekly preference and an optional backup person. Recurrence and backup contact are not executed.
@@ -49,7 +50,7 @@ With the development server running, Node.js/npm installed and Chromium availabl
 ./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
 ```
 
-The runner uses a pinned Playwright CLI version, creates a dedicated browser session, runs six suites in isolated contexts with synthetic data, then closes its own session. The first invocation may download the test runner from npm. It accepts loopback URLs only. Tests do not import your browser profile, contact external recipients or need a preview-session key. Test definitions are in `tests/`; paths are relative to the script, not to the original author's computer. Generated CLI artifacts are ignored by Git.
+The runner uses a pinned Playwright CLI version, creates a dedicated browser session, runs seven suites in isolated contexts with synthetic data, then closes its own session. The first invocation may download the test runner from npm. It accepts loopback URLs only. Tests do not import your browser profile, contact external recipients or need a preview-session key. Test definitions are in `tests/`; paths are relative to the script, not to the original author's computer. Generated CLI artifacts are ignored by Git.
 
 Before opening a browser, the runner checks its result-handling contract. A missing result, duplicate success results, a reported tool error or a failed process must fail the run; exit code zero by itself is not treated as proof that a browser test passed. Each browser suite must return exactly one explicit successful result. These controller checks can also be run separately with `./illness-preview/tests/runner-contract.ps1`.
 

@@ -56,6 +56,7 @@ const seed={version:1,owner:'Robert',defaultId:'ill',contacts:[{id:'maya',name:'
 let data,db,key,draft=null,contactDraft=null,view='home',busy=false,ready=false,revision=0;
 let concepts={},conceptQueue=Promise.resolve(),conceptPending=0,conceptError=null,editorKey=null;
 let restoreCandidate=null;
+let importStage=null;
 const online=window.AutofeverBridge||null;
 const repeats={once:'Eenmalig',daily:'Dagelijks',weekly:'Wekelijks'};
 async function seal(value){const iv=crypto.getRandomValues(new Uint8Array(12));return {iv,body:await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(JSON.stringify(value)))};}
@@ -115,6 +116,47 @@ function contactIssues(c){
  if(c.channels.some(ch=>['SMS','WhatsApp'].includes(ch))&&(!/^[+\d\s().-]+$/.test(c.phone)||c.phone.replace(/\D/g,'').length<7||c.phone.replace(/\D/g,'').length>15))issues.push('vul een geldig telefoonnummer in');
  return issues;
 }
+function vcardText(value){return value.replace(/\\n/gi,' ').replace(/\\([\\,;:])/g,'$1').replace(/[\u0000-\u001f\u007f]/g,' ').trim();}
+function vcardUnfold(source){
+ const physical=source.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n').split('\n'),lines=[];
+ for(const line of physical){if(!line){continue;}if(lines.length&&lines[lines.length-1].endsWith('=')&&!/^[ \t]/.test(line)){lines[lines.length-1]=lines[lines.length-1].slice(0,-1)+line;continue;}if(/^[ \t]/.test(line)&&lines.length)lines[lines.length-1]+=line.slice(1);else lines.push(line);}
+ return lines;
+}
+function vcardValue(raw,params){
+ let value=raw;if(/(?:^|;)ENCODING=(?:QUOTED-PRINTABLE|Q)(?:;|$)/i.test(params)){
+  const bytes=[];for(let i=0;i<raw.length;i++){if(raw[i]==='='&&/^[0-9a-f]{2}$/i.test(raw.slice(i+1,i+3))){bytes.push(parseInt(raw.slice(i+1,i+3),16));i+=2;}else bytes.push(raw.charCodeAt(i)&255);}
+  const match=params.match(/(?:^|;)CHARSET="?([^;\"]+)/i);try{value=new TextDecoder(match?.[1]||'utf-8',{fatal:false}).decode(new Uint8Array(bytes));}catch{value=new TextDecoder().decode(new Uint8Array(bytes));}
+ }
+ return vcardText(value);
+}
+function parseVCards(source){
+ if(typeof source!=='string'||source.length>2*1024*1024)throw Error('Bestand is leeg of groter dan 2 MB.');
+ const cards=[];let current=null;
+ for(const line of vcardUnfold(source)){
+  if(/^BEGIN:VCARD$/i.test(line)){if(current)throw Error('Het vCard-bestand bevat een onvolledig contact.');current={names:[],structured:[],emails:[],phones:[],groups:[]};continue;}
+  if(/^END:VCARD$/i.test(line)){if(!current)throw Error('Het vCard-bestand heeft geen herkenbare contacten.');cards.push(current);current=null;if(cards.length>250)throw Error('Importeer maximaal 250 contacten tegelijk.');continue;}
+  if(!current)continue;const colon=line.indexOf(':');if(colon<1)continue;const left=line.slice(0,colon),raw=line.slice(colon+1),parts=left.split(';'),property=(parts.shift().split('.').pop()||'').toUpperCase(),params=parts.join(';'),value=vcardValue(raw,params);
+  if(property==='FN'&&value)current.names.push(value);else if(property==='N')current.structured.push(value);else if(property==='EMAIL'&&value)current.emails.push(value);else if(property==='TEL'&&value)current.phones.push(value.replace(/^tel:/i,''));else if(property==='ORG'&&value)current.groups.push(value);else if(property==='CATEGORIES'&&value)current.groups.push(value.split(',')[0].trim());
+ }
+ if(current)throw Error('Het vCard-bestand bevat een contact zonder afsluiting.');
+ if(!cards.length)throw Error('Geen vCard-contacten gevonden. Kies een geldig .vcf-bestand.');
+ const unique=(values,normalize)=>[...new Map(values.map(x=>[normalize(x),x]).filter(([key])=>key)).values()];
+ return cards.map(card=>{const structured=card.structured[0]?.split(';')||[],fallback=[structured[3],structured[1],structured[2],structured[0],structured[4]].filter(Boolean).join(' ').trim(),emails=unique(card.emails,x=>x.trim().toLowerCase()),phones=unique(card.phones,x=>x.replace(/[^+\d]/g,''));return {id:uid(),name:card.names[0]||fallback,group:card.groups[0]||'Geïmporteerd',emails,phones,emailChoice:emails.length?'0':'',phoneChoice:phones.length?'0':'',include:true};});
+}
+function chosenVCard(values,choice){return choice===''||choice==null?'':values[Number(choice)]||'';}
+function contactWord(count){return count===1?'contact':'contacten';}
+function importedContacts(){return importStage?.filter(x=>x.include&&!x.duplicate&&x.name.trim()).map(x=>({id:x.id,name:x.name.trim(),group:x.group.trim()||'Geïmporteerd',email:chosenVCard(x.emails,x.emailChoice),phone:chosenVCard(x.phones,x.phoneChoice),channels:[]}))||[];}
+function contactDuplicate(candidate){const email=chosenVCard(candidate.emails,candidate.emailChoice).trim().toLowerCase(),phone=chosenVCard(candidate.phones,candidate.phoneChoice).replace(/[^+\d]/g,'');return data.contacts.find(x=>(email&&x.email.trim().toLowerCase()===email)||(phone&&x.phone.replace(/[^+\d]/g,'')===phone));}
+function markVCardDuplicates(){const emails=new Set(),phones=new Set();for(const x of importStage||[]){const email=chosenVCard(x.emails,x.emailChoice).trim().toLowerCase(),phone=chosenVCard(x.phones,x.phoneChoice).replace(/[^+\d]/g,'');x.duplicateFile=!!((email&&emails.has(email))||(phone&&phones.has(phone)));if(email)emails.add(email);if(phone)phones.add(phone);x.duplicate=!!contactDuplicate(x)||x.duplicateFile;if(x.duplicate)x.include=false;}}
+function vcardReview(){
+ if(!importStage)return '';markVCardDuplicates();const duplicateCount=importStage.filter(x=>x.duplicate).length,eligible=importedContacts().length;
+ const rows=importStage.map((x,index)=>{const duplicate=x.duplicate,unusable=!x.name.trim();const fields=[['Naam','name',x.name],['Groep','group',x.group]];const textFields=fields.map(([label,key,value])=>'<label for="vc-'+x.id+'-'+key+'">'+label+'</label><input id="vc-'+x.id+'-'+key+'" data-vcard-field="'+key+'" data-vcard-index="'+index+'" value="'+esc(value)+'" maxlength="80">').join('');
+  const choices=(label,key,values,choice)=>'<label for="vc-'+x.id+'-'+key+'">'+label+'</label><select id="vc-'+x.id+'-'+key+'" data-vcard-field="'+key+'Choice" data-vcard-index="'+index+'"><option value="">Niet importeren</option>'+values.map((value,i)=>'<option value="'+i+'"'+(String(i)===String(choice)?' selected':'')+'>'+esc(value)+'</option>').join('')+'</select>';
+  const reason=duplicate?'Dubbel contact; niet opnieuw toegevoegd.':unusable?'Geen naam gevonden; vul een naam in om dit contact te importeren.':'';
+  return '<article class="task-block"><label class="check"><input type="checkbox" data-vcard-field="include" data-vcard-index="'+index+'"'+(x.include&&!duplicate&&!unusable?' checked':'')+'><span><strong>'+esc(x.name||'Naam ontbreekt')+'</strong> · <span data-vcard-status="'+index+'">'+(duplicate?'Al aanwezig':unusable?'Controleer naam':'Controleren')+'</span></span></label><p class="hint warning" data-vcard-reason="'+index+'"'+(!reason?' hidden':'')+'>'+esc(reason)+'</p>'+textFields+choices('E-mailadres','email',x.emails,x.emailChoice)+choices('Telefoonnummer','phone',x.phones,x.phoneChoice)+(x.emails.length>1||x.phones.length>1?'<p class="hint">Kies hierboven welk adres of nummer je wilt bewaren.</p>':'')+'</article>';}).join('');
+ return '<section class="section-gap" id="vcard-review" aria-labelledby="vcard-heading"><h2 id="vcard-heading">Controleer de import</h2><p class="hint">'+importStage.length+' '+contactWord(importStage.length)+' gevonden · '+duplicateCount+' bestaand of dubbel · '+eligible+' geselecteerd. Importeren kiest geen bezorgkanaal en voegt niemand aan een profiel toe.</p>'+rows+'<div id="vcard-error" class="error" role="alert"></div><div class="actions"><button type="button" class="primary" data-action="confirm-vcard"'+(!eligible?' disabled':'')+'>Importeer '+eligible+' '+contactWord(eligible)+'</button><button type="button" class="text-button" data-action="cancel-vcard">Annuleren</button></div></section>';
+}
+function updateVCardSummary(){if(!importStage)return;markVCardDuplicates();const eligible=importedContacts().length,summary=$('#vcard-review .hint'),confirm=$('[data-action="confirm-vcard"]');for(const[i,x]of importStage.entries()){const duplicate=x.duplicate,unusable=!x.name.trim(),status=document.querySelector('[data-vcard-status="'+i+'"]'),reason=document.querySelector('[data-vcard-reason="'+i+'"]'),checkbox=document.querySelector('[data-vcard-field="include"][data-vcard-index="'+i+'"]');if(status)status.textContent=duplicate?'Al aanwezig':unusable?'Controleer naam':'Controleren';if(reason){const message=duplicate?'Dubbel contact; niet opnieuw toegevoegd.':unusable?'Geen naam gevonden; vul een naam in om dit contact te importeren.':'';reason.textContent=message;reason.hidden=!message;}if(checkbox)checkbox.checked=x.include&&!duplicate&&!unusable;}if(summary)summary.textContent=importStage.length+' '+contactWord(importStage.length)+' gevonden · '+importStage.filter(c=>c.duplicate).length+' bestaand of dubbel · '+eligible+' geselecteerd. Importeren kiest geen bezorgkanaal en voegt niemand aan een profiel toe.';if(confirm){confirm.disabled=!eligible;confirm.textContent='Importeer '+eligible+' '+contactWord(eligible);}}
 function readiness(p){
  const issues=[];if(!p)return ['Maak eerst een profiel.'];
  if(!p.recipients.length)issues.push('Selecteer minstens één ontvanger.');
@@ -138,7 +180,7 @@ function render(){
  }else if(view==='profiles'){
  $('#main').innerHTML='<h1 class="edit-title">Jouw profielen.</h1><p class="intro">Pas per situatie je bericht, mensen en hulpvragen aan.</p>'+data.profiles.map(x=>'<article class="profile-summary"><h2>'+esc(x.name)+(x.id===data.defaultId?' · Standaard':'')+'</h2><p class="long">'+esc(x.message)+'</p><p class="hint">'+esc(names(x.recipients))+' · '+x.tasks.length+' hulptaken</p><div class="toolbar">'+button('Bewerken','edit-profile','secondary',x.id)+(x.id!==data.defaultId?button('Als standaard','default','text-button',x.id):'')+'</div></article>').join('')+'<div class="actions">'+button('Nieuw profiel','new-profile','primary')+'</div>';
  }else if(view==='people'){
- $('#main').innerHTML='<h1 class="edit-title">Jouw mensen.</h1><p class="intro">Voeg contacten toe en kies hoe je hen wilt bereiken.</p>'+data.contacts.map(c=>'<div class="row"><span class="face">'+esc(c.name[0])+'</span><div class="detail"><strong>'+esc(c.name)+'</strong><small>'+esc(c.group)+' · '+esc(c.channels.join(', '))+'</small></div>'+button('Wijzig','edit-person','text-button',c.id)+'</div>').join('')+'<div class="actions">'+button('Persoon toevoegen','new-person','primary')+'</div>';
+ $('#main').innerHTML='<h1 class="edit-title">Jouw mensen.</h1><p class="intro">Voeg contacten toe en kies hoe je hen wilt bereiken.</p>'+data.contacts.map(c=>'<div class="row"><span class="face">'+esc(c.name[0])+'</span><div class="detail"><strong>'+esc(c.name)+'</strong><small>'+esc(c.group)+' · '+esc(c.channels.join(', ')||'Nog geen bezorgkanaal gekozen')+'</small></div>'+button('Wijzig','edit-person','text-button',c.id)+'</div>').join('')+'<div class="actions">'+button('Persoon toevoegen','new-person','secondary')+'<button type="button" class="primary" data-action="select-vcard">Importeer vCard</button></div><input id="vcard-file" type="file" accept=".vcf,text/vcard,text/x-vcard" hidden><p class="hint">Een .vcf-bestand wordt eerst hier gecontroleerd. Importeren verstuurt niets, kiest geen bezorgkanaal en voegt niemand aan een profiel toe. Kies pas daarna zelf kanalen en ontvangers.</p>'+vcardReview();
  }else if(view==='settings')renderSettings();
  else if(view==='edit-profile') renderProfile();
  else if(view==='edit-person') renderPerson();
@@ -228,6 +270,14 @@ let lastRecovery='';
 async function action(a,id){
  if(!ready||busy)return;
  if(online?.handles(a)){busy=true;try{await online.action(a);}finally{busy=false;}return;}
+ if(a==='select-vcard'){$('#vcard-file')?.click();return;}
+ if(a==='cancel-vcard'){importStage=null;render();say('Import geannuleerd. Er is niets toegevoegd.');return;}
+ if(a==='confirm-vcard'){
+  for(const field of document.querySelectorAll('[data-vcard-index][data-vcard-field]')){const x=importStage?.[Number(field.dataset.vcardIndex)];if(!x)continue;const name=field.dataset.vcardField;if(name==='include')x.include=field.checked;else if(name==='emailChoice'||name==='phoneChoice')x[name]=field.value;else x[name]=field.value;}
+  markVCardDuplicates();const chosen=importedContacts();if(!chosen.length){render();say('Er zijn geen nieuwe geldige contacten geselecteerd. Controleer dubbele contacten en namen.',true);return;}
+  if(chosen.some(x=>x.name.length>80||x.group.length>80)){say('Een naam of groep is te lang. Pas de selectie aan en probeer opnieuw.',true);return;}
+  const next=clone(data);next.contacts.push(...chosen);busy=true;try{await commit(next);importStage=null;await move('people');say(chosen.length+' '+contactWord(chosen.length)+' lokaal toegevoegd. Kies later zelf een bezorgkanaal en profiel.');}finally{busy=false;}return;
+ }
  if(a==='large-text'||a==='high-contrast'){busy=true;try{const next=clone(data);next.preferences={largeText:data.preferences?.largeText===true,highContrast:data.preferences?.highContrast===true};const field=a==='large-text'?'largeText':'highContrast';next.preferences[field]=!next.preferences[field];await commit(next);applyAppearance();document.querySelector('[data-action="'+a+'"]').setAttribute('aria-pressed',String(next.preferences[field]));say('Leesvoorkeur opgeslagen.');}finally{busy=false;}return;}
  if(['home','profiles','people','update','settings'].includes(a)){restoreCandidate=null;await move(a);return;}
  if(a==='restore-backup'){if(!restoreCandidate)return;if(!confirm('Huidige opgeslagen gegevens en concepten vervangen door deze back-up? Download eerst een back-up als je ze wilt bewaren. Er wordt niets verstuurd.'))return;busy=true;try{await conceptQueue;const candidate=restoreCandidate,oldConcepts=await request(db.transaction('vault').objectStore('vault').get('concepts'));const sealedData=await seal(candidate.data),sealedConcepts=await seal(candidate.concepts);await checkedWrite({data:sealedData,concepts:sealedConcepts},{data:revision,concepts:oldConcepts?.revision||0});revision++;data=candidate.data;concepts=candidate.concepts;restoreCandidate=null;await move('settings');say('Back-up teruggezet op deze browser.');}finally{busy=false;}return;}
@@ -246,8 +296,11 @@ async function action(a,id){
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-action],[data-go]');if(b)action(b.dataset.action||b.dataset.go,b.dataset.id).catch(error=>say(saveError(error),true));});
 function updateSummaries(){if(!draft||!$('#profile-form'))return;$('[data-summary="message"]').textContent=draft.name||'Geef je profiel een naam';$('[data-summary="people"]').textContent=draft.recipients.length+' ontvangers';$('[data-summary="help"]').textContent=draft.tasks.length?draft.tasks.length+' hulptaken':'Alleen informeren, geen hulp vragen';document.querySelectorAll('[data-message-for]').forEach(el=>{const id=el.dataset.messageFor;el.textContent=draft.custom?.[id]&&draft.overrides[id]?draft.overrides[id]:draft.message;});}
-document.addEventListener('input',e=>{if(e.target.closest('#profile-form,#person-form,#update-form')){captureEditor();updateSummaries();persistConcepts().catch(()=>{});}});
-document.addEventListener('change',e=>{if(e.target.matches('#profile-form input[name=recipient]')){collectDraft();document.querySelectorAll('[data-recipient-setting]').forEach(el=>el.hidden=!draft.recipients.includes(el.dataset.recipientSetting));$('#tasks').innerHTML=draft.tasks.map(taskEditor).join('');}if(e.target.matches('#profile-form input[name=custom]'))document.querySelectorAll('[data-override]').forEach(el=>{if(el.dataset.override===e.target.value)el.hidden=!e.target.checked;});if(e.target.closest('#profile-form,#person-form,#update-form')){captureEditor();updateSummaries();persistConcepts().catch(()=>{});}});
+document.addEventListener('input',e=>{const field=e.target.closest('[data-vcard-index][data-vcard-field]');if(field){const x=importStage?.[Number(field.dataset.vcardIndex)];if(x&&['name','group'].includes(field.dataset.vcardField))x[field.dataset.vcardField]=field.value;updateVCardSummary();}if(e.target.closest('#profile-form,#person-form,#update-form')){captureEditor();updateSummaries();persistConcepts().catch(()=>{});}});
+document.addEventListener('change',async e=>{
+ if(e.target.id==='vcard-file'){const file=e.target.files?.[0];if(!file)return;try{if(file.size>2*1024*1024)throw Error('Het vCard-bestand is groter dan 2 MB.');importStage=parseVCards(await file.text());markVCardDuplicates();render();$('#vcard-heading')?.focus?.();}catch(error){importStage=null;render();say(error.message||'Dit vCard-bestand kan niet worden gelezen.',true);}finally{e.target.value='';}return;}
+ const vcard=e.target.closest('[data-vcard-index][data-vcard-field]');if(vcard){const x=importStage?.[Number(vcard.dataset.vcardIndex)];if(x){const field=vcard.dataset.vcardField;if(field==='include')x.include=vcard.checked;else x[field]=vcard.value;updateVCardSummary();}}
+ if(e.target.matches('#profile-form input[name=recipient]')){collectDraft();document.querySelectorAll('[data-recipient-setting]').forEach(el=>el.hidden=!draft.recipients.includes(el.dataset.recipientSetting));$('#tasks').innerHTML=draft.tasks.map(taskEditor).join('');}if(e.target.matches('#profile-form input[name=custom]'))document.querySelectorAll('[data-override]').forEach(el=>{if(el.dataset.override===e.target.value)el.hidden=!e.target.checked;});if(e.target.closest('#profile-form,#person-form,#update-form')){captureEditor();updateSummaries();persistConcepts().catch(()=>{});}});
 document.addEventListener('invalid',e=>{let el=e.target.parentElement;while(el){if(el.tagName==='DETAILS')el.open=true;el=el.parentElement;}},true);
 window.addEventListener('beforeunload',e=>{if(conceptPending||conceptError){e.preventDefault();e.returnValue='';}});
 if(window.visualViewport)visualViewport.addEventListener('resize',()=>$('.app').classList.toggle('keyboard-open',visualViewport.height<innerHeight*.75));
