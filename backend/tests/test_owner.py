@@ -4,9 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from backend.dispatch_lock import delivery_lock
 from backend.owner_web import OwnerApp
 from backend.profile import compile_profile
-from backend.service import Store, Invalid
+from backend.service import Store, Conflict, Invalid
 from backend.web import RecipientApp
 from backend.tests import test_web
 
@@ -156,6 +157,65 @@ class OwnerTests(unittest.TestCase):
         self.assertEqual(len(json.loads(response['body'])['data']['episodes']), 2)
         self.assertEqual(self.request('/api/v1/owner/export', token=self.other)['status'], 200)
         self.assertEqual(self.request('/api/v1/owner/export', token='A' * 43)['status'], 404)
+
+    def test_owner_server_data_deletion_removes_only_live_records_and_is_repeatable(self):
+        now = [1_800_000_000]
+        self.store.clock = lambda: now[0]
+        first = json.loads(self.activate()['body'])['data']
+        dispatched = []
+        self.assertTrue(self.store.dispatch_one(lambda job: dispatched.append(job) or 'synthetic-only'))
+        helper_token = dispatched[0]['action_token']
+        now[0] += 4 * 3600
+        self.store.confirm_checkin(self.owner, first['id'], 'delete-checkin')
+        self.store.update(self.owner, first['id'], 'delete-update', 'Synthetic update', ['alice'])
+        self.store.close(self.owner, first['id'], 'cancelled')
+        json.loads(self.activate(command='second-before-delete')['body'])
+        other_episode = self.store.activate_profile(self.other, 'other-owner', saved_profile(), saved_contacts(), link_ttl=3600)
+
+        body = {'confirmation': 'DELETE_MY_SERVER_DATA'}
+        response = self.request('/api/v1/owner/data-deletion', 'POST', body)
+        self.assertEqual(response['status'], 200)
+        self.assertEqual(json.loads(response['body'])['data'], {'deleted_episodes': 2})
+        self.assertIsNone(self.store.latest_episode(self.owner))
+        self.assertEqual(self.store.latest_episode(self.other)['id'], other_episode)
+        self.assertEqual(self.store.export_owner(self.owner)['episodes'], [])
+        self.assertEqual(self.request('/api/v1/recipient', token=helper_token)['status'], 404)
+        self.assertEqual(self.request('/api/v1/owner/data-deletion', 'POST', body)['status'], 200)
+        self.assertEqual(json.loads(self.request('/api/v1/owner/data-deletion', 'POST', body)['body'])['data'],
+                         {'deleted_episodes': 0})
+        with self.store.transaction() as db:
+            self.assertIsNone(db.execute('SELECT 1 FROM metadata WHERE name=?', ('checkin:' + first['id'],)).fetchone())
+            self.assertFalse(db.execute("SELECT 1 FROM metadata WHERE name LIKE 'update:%' ").fetchone())
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM episodes WHERE owner=?', (self.owner,)).fetchone()[0], 0)
+
+        # Deleting history retains the provisioned owner capability for future use.
+        restarted = self.activate(command='after-delete')
+        self.assertEqual(restarted['status'], 200)
+        self.assertEqual(self.store.latest_episode(self.owner)['state'], 'active')
+
+    def test_owner_server_data_deletion_fails_closed_for_unresolved_or_active_delivery(self):
+        episode = json.loads(self.activate()['body'])['data']
+        body = {'confirmation': 'DELETE_MY_SERVER_DATA'}
+        job_id = episode['notifications'][0]['id']
+        with self.store.transaction() as db:
+            db.execute("UPDATE jobs SET status='sending',attempts=1,lease=0 WHERE id=?", (job_id,))
+        with self.assertRaises(Conflict):
+            self.store.delete_owner_data(self.owner)
+        with self.store.transaction() as db:
+            db.execute("UPDATE jobs SET status='uncertain' WHERE id=?", (job_id,))
+        with self.assertRaises(Conflict):
+            self.store.delete_owner_data(self.owner)
+        with self.store.transaction() as db:
+            db.execute("UPDATE jobs SET status='queued',attempts=0,lease=NULL WHERE id=?", (job_id,))
+        with delivery_lock(self.path):
+            with self.assertRaises(Conflict):
+                self.store.delete_owner_data(self.owner)
+        self.assertEqual(self.request('/api/v1/owner/data-deletion', 'POST',
+                                      {'confirmation': 'DELETE_MY_SERVER_DATA', 'extra': True})['status'], 400)
+        self.assertEqual(self.request('/api/v1/owner/data-deletion', 'GET')['status'], 405)
+        self.assertEqual(self.request('/api/v1/owner/data-deletion', 'POST', body, token=self.other)['status'], 200)
+        self.assertEqual(self.store.delete_owner_data(self.owner), 1)
+        self.assertIsNone(self.store.latest_episode(self.owner))
 
     def test_recovery_targets_accepted_only_and_closure_is_repeatable(self):
         episode = json.loads(self.activate()['body'])['data']

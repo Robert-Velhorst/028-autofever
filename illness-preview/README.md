@@ -19,6 +19,7 @@ The preview does not send messages, create reminder jobs, contact backup helpers
 - Activation snapshots the saved plan. Later profile edits do not change that active snapshot. Updates can be kept locally; recovery and cancellation close the local preview.
 - AES-GCM encrypted browser storage, including separate encrypted drafts. Optimistic revision checks reject stale saved-data writes from another tab. Different draft records are merged when saved. Simultaneously editing the same draft remains a last-writer case; do not claim collaborative editing support.
 - Downloadable, password-encrypted backup and restore covering contacts, profiles, active preview and drafts. Backup format v1 uses PBKDF2-SHA256 (600,000 iterations, random 16-byte salt) and AES-GCM (random 12-byte IV). Import checks the envelope, authenticates ciphertext, validates its contents and requires confirmation before replacement. Files larger than 5 MB are rejected.
+- Settings provides a separately confirmed control to clear this browser's local vault, including profiles, contacts, drafts, and the optional server connection. Other tabs are notified and reload; stale writes are rejected. This does not delete server records, downloaded backups, or previously delivered copies.
 - Accessible labels, page-heading focus on navigation, focus on newly added tasks, invalid-field section expansion and a separate save area below the scrolling editor. Save controls do not float over the form.
 - Optional larger text and high-contrast presentation under Settings. Preferences persist locally and travel with encrypted backups; older backups without preferences continue to work.
 
@@ -40,6 +41,8 @@ The storage encryption key is in the same browser database as the ciphertext. En
 
 Backups use an independent user-supplied passphrase. The app does not retain that passphrase; a lost passphrase cannot be recovered. Keep the backup file and passphrase separately. Clearing browser/site data can destroy local settings without a backup. Restoring replaces this browser's data and does not send notifications.
 
+The local-vault deletion control removes the current browser's saved records and connection; it does not erase server history, downloaded backup files, operator-held backups, or messages/copies already delivered to other people. This is a local browser-storage action, not a remote account or backup-erasure request.
+
 Sample contact names illustrate configuration; blank sample contact details are deliberately reported as incomplete. Do not mistake these samples for imported contacts.
 
 ## Verification and remaining work
@@ -50,7 +53,7 @@ With the development server running, Node.js/npm installed and Chromium availabl
 ./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
 ```
 
-The runner uses a pinned Playwright CLI version, creates a dedicated browser session, runs seven suites in isolated contexts with synthetic data, then closes its own session. The first invocation may download the test runner from npm. It accepts loopback URLs only. Tests do not import your browser profile, contact external recipients or need a preview-session key. Test definitions are in `tests/`; paths are relative to the script, not to the original author's computer. Generated CLI artifacts are ignored by Git.
+The runner uses a pinned Playwright CLI version, creates a dedicated browser session, runs eight suites in isolated contexts with synthetic data, then closes its own session. The first invocation may download the test runner from npm. It accepts loopback URLs only. Tests do not import your browser profile, contact external recipients or need a preview-session key. Test definitions are in `tests/`; paths are relative to the script, not to the original author's computer. Generated CLI artifacts are ignored by Git. The deletion suite checks that a stale tab cannot restore records after the local vault is cleared.
 
 Before opening a browser, the runner checks its result-handling contract. A missing result, duplicate success results, a reported tool error or a failed process must fail the run; exit code zero by itself is not treated as proof that a browser test passed. Each browser suite must return exactly one explicit successful result. These controller checks can also be run separately with `./illness-preview/tests/runner-contract.ps1`.
 

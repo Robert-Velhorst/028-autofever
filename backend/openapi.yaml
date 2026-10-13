@@ -52,6 +52,41 @@ paths:
         '405': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/owner/data-deletion:
+    post:
+      operationId: deleteOwnerServerData
+      summary: Idempotently delete this owner's live server episode data
+      description: |
+        Requires the exact confirmation value. Under the shared delivery lock and one
+        database transaction, removes this owner's episodes, snapshots, contacts,
+        recipients/helper capabilities, tasks, queued jobs, check-ins, updates and
+        episode reconciliation records. Owner access is retained so the user can reuse
+        the service. Fails with 409 while a provider attempt is sending or uncertain.
+        Already sent messages and operator backup copies cannot be recalled or removed
+        by this route. Local browser profiles are not affected.
+      security: [{ownerCapability: []}]
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmation]
+              properties:
+                confirmation: {type: string, const: DELETE_MY_SERVER_DATA}
+      responses:
+        '200': {$ref: '#/components/responses/OwnerDeletion'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/owner/episodes:
     post:
       operationId: activateSavedOwnerProfile
@@ -550,6 +585,21 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/OwnerExport'}
+    OwnerDeletion:
+      description: Live episode data removed for the authenticated owner; owner access remains. Backups and already-sent messages are unaffected.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [data]
+            properties:
+              data:
+                type: object
+                additionalProperties: false
+                required: [deleted_episodes]
+                properties:
+                  deleted_episodes: {type: integer, minimum: 0}
     View:
       description: Current scoped recipient view. All responses use Cache-Control no-store.
       content:

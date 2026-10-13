@@ -23,6 +23,7 @@ window.AutofeverBridge = (() => {
   }
   function failure(exc) {
     if (exc.code === 'STALE') return 'De koppeling of het profiel is in een andere tab gewijzigd. Herlaad voordat je verdergaat.';
+    if (exc.path === 'data-deletion' && exc.status === 409) return 'Servergegevens zijn niet gewist: er is een actieve of onzekere bezorgpoging. Los die eerst op en probeer daarna opnieuw.';
     if (exc.path === 'episode-updates' && [400,413].includes(exc.status)) return 'Controleer je update: maximaal 2000 tekens en minstens één geldige ontvanger.';
     if (exc.status === 400) return 'Het opgeslagen profiel wordt nog niet ondersteund. Controleer ontvangers en gebruik per persoon één e-mail-, SMS- of WhatsApp-kanaal. Telefoonnummers beginnen met +landcode.';
     if (exc.status === 413) return 'Dit profiel is te groot voor de server. Verklein het voordat je opnieuw start.';
@@ -33,7 +34,7 @@ window.AutofeverBridge = (() => {
   async function run(operation) {
     if (working) return;
     working = true;
-    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button').forEach(b => b.disabled = true);
+    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-export input,#owner-export button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
     try { error = ''; await operation(); }
     catch (exc) { error = failure(exc); }
     finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); }
@@ -187,10 +188,16 @@ window.AutofeverBridge = (() => {
     }
     if (view !== 'settings') return;
     document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens exporteren</h2><p class="hint">Dit bevat je serverhistorie: ziekte- en herstelberichten, contactgegevens, helperstatus en check-ins. De download wordt eerst met een aparte wachtzin versleuteld. Bewaar die wachtzin los van het bestand. Dit exporteert niet je lokale profielen; gebruik daarvoor de gewone Autofever-back-up.</p><form id="owner-export"><label for="owner-export-password">Wachtzin voor de serverexport</label><input id="owner-export-password" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><label for="owner-export-confirm">Herhaal de wachtzin</label><input id="owner-export-confirm" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><p class="hint">Minstens 14 tekens. De wachtzin wordt niet opgeslagen of naar de server gestuurd.</p><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Versleutelde serverexport downloaden</button></div></form></section><section class="section-gap"><h2>Lokale server koppelen</h2><p class="hint">Eenmalige privésleutel van de beheerder, geen nieuw account. Alleen deze server op dit adres. Bewaar de sleutel apart; de profielback-up bevat hem niet. De sleutel wordt hier versleuteld opgeslagen, met de browsersleutel op hetzelfde apparaat.</p>'+(state.token?'<p class="hint">Koppeling bewaard. Verlopen hulplinks sluiten na '+escape(state.hours)+' uur.</p>':'')+'<form id="owner-connect"><label for="owner-token">Privésleutel voor jouw meldingen</label><input id="owner-token" type="password" autocomplete="off" maxlength="43" required><label for="owner-hours">Geldigheid hulplink in uren</label><input id="owner-hours" type="number" min="1" max="168" value="'+escape(state.hours||24)+'" required><div class="actions"><button class="primary" type="submit">Koppeling controleren en bewaren</button></div></form><p class="hint">Terugzetten van een profielback-up wijzigt geen lopende servermelding. Meerdere kanalen per persoon en push zijn nog niet aangesloten; kies voor deze koppeling één beginkanaal.</p></section>');
+    document.querySelector('#owner-export').closest('section').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens wissen</h2><p class="hint">Dit verwijdert je live serverhistorie: ziekte- en herstelteksten, contactgegevens, helpers, check-ins en de berichtenwachtrij. Klaarstaande berichten worden verwijderd; eerder bezorgde berichten kunnen niet worden teruggehaald. Je lokale profielen en serverkoppeling blijven bewaard. Gegevens in operatorback-ups of bij ontvangers worden niet door deze actie gewist.</p><form id="owner-data-delete"><label for="owner-data-delete-confirm">Typ VERWIJDER MIJN SERVERGEGEVENS om te bevestigen</label><input id="owner-data-delete-confirm" type="text" autocomplete="off" maxlength="64" required><p class="hint">Niet mogelijk zolang een verzending bezig is of een provideruitkomst onzeker is; die moet eerst worden opgelost.</p><div class="actions"><button class="text-button" type="submit"'+(!state.token?' disabled':'')+'>Alle servergegevens verwijderen</button></div></form></section>');
   }
   document.addEventListener('click', event => {
     const control = event.target.closest('[data-owner-action]');
     if(control && ctx) {event.preventDefault(); action(control.dataset.ownerAction);}
+  });
+  document.addEventListener('input', event => {
+    if(event.target.id === 'owner-data-delete-confirm') {
+      document.querySelector('#owner-data-delete button[type="submit"]').disabled = event.target.value !== 'VERWIJDER MIJN SERVERGEGEVENS';
+    }
   });
   const captureUpdate = event => {
     if(event.target.closest('#owner-update') && current) {
@@ -201,6 +208,20 @@ window.AutofeverBridge = (() => {
   document.addEventListener('input',captureUpdate);
   document.addEventListener('change',captureUpdate);
   document.addEventListener('submit', event => {
+    if(event.target.id === 'owner-data-delete' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      run(async () => {
+        if(!state.token || state.pending) throw {userMessage:'Koppel eerst de server en rond een eventuele onzekere actie af.'};
+        if(document.getElementById('owner-data-delete-confirm').value !== 'VERWIJDER MIJN SERVERGEGEVENS') throw {userMessage:'Typ de bevestigingszin exact over om de servergegevens te wissen.'};
+        if(!confirm('Alle live serverepisoden, contactgegevens, helperreacties, check-ins en wachtrijberichten voor deze eigenaar wissen? Lokale profielen blijven bestaan; al bezorgde berichten en operatorback-ups niet.')) return;
+        const result=await api('data-deletion',{confirmation:'DELETE_MY_SERVER_DATA'});
+        if(!Number.isInteger(result?.deleted_episodes) || result.deleted_episodes<0) throw {userMessage:'De server gaf geen geldige wisbevestiging. Controleer de serverstand voordat je verdergaat.'};
+        await save({...state,pending:null,updateDraft:null});
+        current=null;
+        ctx.say('Serverhistorie gewist. Je lokale profielen en serverkoppeling zijn behouden.');
+      });
+      return;
+    }
     if(event.target.id === 'owner-update' && ctx) {
       event.preventDefault(); event.stopImmediatePropagation();
       captureUpdate({target:event.target});

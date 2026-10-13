@@ -6,3 +6,4 @@
 *.afkey
 *.afowner
 .autofever-provision-*/
+.playwright-cli/

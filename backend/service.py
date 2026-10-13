@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from backend.profile import compile_profile
-from backend.dispatch_lock import delivery_lock
+from backend.dispatch_lock import DeliveryBusy, delivery_lock
 
 
 class Invalid(ValueError):
@@ -423,6 +423,39 @@ class Store(RecordCodec):
             return {'format': 'autofever-owner-export', 'version': 1, 'exported_at': int(self.clock()),
                     'episodes': [{'created_at': row['created'],
                                   **self._episode_view(db, row, include_closed_checkin=True)} for row in rows]}
+
+    def delete_owner_data(self, owner_token):
+        """Remove all live episode data for this owner without removing their access."""
+        try:
+            # Serialize against workers and operator reconciliation for the full
+            # deletion transaction, so no provider call can begin after the wipe.
+            with delivery_lock(self.path, timeout=0):
+                with self.transaction() as db:
+                    owner = self._owner(db, owner_token)
+                    unresolved = db.execute(
+                        "SELECT 1 FROM jobs j JOIN episodes e ON e.id=j.episode "
+                        "WHERE e.owner=? AND j.status IN ('sending','uncertain') LIMIT 1", (owner,)).fetchone()
+                    if unresolved:
+                        raise Conflict('Resolve all sending or uncertain provider outcomes before deleting')
+                    episodes = [row['id'] for row in db.execute(
+                        'SELECT id FROM episodes WHERE owner=? ORDER BY rowid', (owner,)).fetchall()]
+                    job_ids = [row['id'] for row in db.execute(
+                        'SELECT j.id FROM jobs j JOIN episodes e ON e.id=j.episode WHERE e.owner=?',
+                        (owner,)).fetchall()]
+                    for eid in episodes:
+                        db.execute('DELETE FROM metadata WHERE name=?', ('checkin:' + eid,))
+                        db.execute('DELETE FROM metadata WHERE name LIKE ?', ('update:' + eid + ':%',))
+                    for jid in job_ids:
+                        db.execute('DELETE FROM metadata WHERE name LIKE ?', ('resolution:' + jid + ':%',))
+                    for eid in episodes:
+                        db.execute('DELETE FROM declines WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM tasks WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM recipients WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM jobs WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM episodes WHERE id=? AND owner=?', (eid, owner))
+                    return len(episodes)
+        except DeliveryBusy as error:
+            raise Conflict('A provider send is active; retry deletion after it finishes') from error
 
     def activate_profile(self, owner_token, command, profile, contacts, *, link_ttl):
         try:

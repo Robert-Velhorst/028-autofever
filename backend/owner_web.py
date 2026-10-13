@@ -11,6 +11,7 @@ from backend.web import RecipientApp, RequestError
 OWNER_ROUTES = {
     '/api/v1/owner/episode': 'GET',
     '/api/v1/owner/export': 'GET',
+    '/api/v1/owner/data-deletion': 'POST',
     '/api/v1/owner/episodes': 'POST',
     '/api/v1/owner/episode-closures': 'POST',
     '/api/v1/owner/episode-updates': 'POST',
@@ -50,6 +51,10 @@ class OwnerApp(RecipientApp):
             result = self.store.latest_episode(token)
         elif path.endswith('/export'):
             result = self.store.export_owner(token)
+        elif path.endswith('/data-deletion'):
+            if not isinstance(value, dict) or value != {'confirmation': 'DELETE_MY_SERVER_DATA'}:
+                raise RequestError(400)
+            result = {'deleted_episodes': self.store.delete_owner_data(token)}
         elif path.endswith('/episodes'):
             if not isinstance(value, dict) or set(value) != {'command', 'profile', 'contacts', 'link_ttl'}:
                 raise RequestError(400)

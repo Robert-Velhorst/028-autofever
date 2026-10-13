@@ -9,11 +9,11 @@ if (-not $taskUrl.IsAbsoluteUri -or $taskUrl.Scheme -notin @('http', 'https') -o
 }
 $taskNpx = if (Get-Command npx.cmd -ErrorAction SilentlyContinue) { 'npx.cmd' } else { 'npx' }
 $taskSession = "autofever-qa-$PID"
-$taskTests = @('mobile-refinement-qa.js', 'mobile-help-backup-qa.js', 'mobile-refinement-regression-qa.js', 'mobile-dock-qa.js', 'mobile-multitab-qa.js', 'accessibility.js', 'contact-import.js')
+$taskTests = @('mobile-refinement-qa.js', 'mobile-help-backup-qa.js', 'mobile-refinement-regression-qa.js', 'mobile-dock-qa.js', 'mobile-multitab-qa.js', 'accessibility.js', 'contact-import.js', 'local-vault-deletion.js')
 
 function Invoke-TaskBrowser {
     param([string[]] $Arguments)
-    $taskOutput = & $taskNpx --yes --package '@playwright/cli@0.1.19' playwright-cli "-s=$taskSession" @Arguments 2>&1
+    $taskOutput = & $taskNpx --yes --package '@playwright/cli@0.1.22' playwright-cli "-s=$taskSession" @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) { throw ($taskOutput -join "`n") }
     if ($taskOutput | Select-String -Pattern '^(### Error|Error:)') { throw ($taskOutput -join "`n") }
     if ($Arguments[0] -eq 'run-code') {
@@ -33,6 +33,6 @@ try {
     }
     Write-Output "All $($taskTests.Count) browser suites passed. No messages were sent."
 } finally {
-    & $taskNpx --yes --package '@playwright/cli@0.1.19' playwright-cli "-s=$taskSession" close 2>&1 | Out-Null
+    & $taskNpx --yes --package '@playwright/cli@0.1.22' playwright-cli "-s=$taskSession" close 2>&1 | Out-Null
     Pop-Location
 }
