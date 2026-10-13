@@ -5,7 +5,12 @@ async (page) => {
   const app=await context.newPage();
   const errors=[];
   app.on('pageerror',error=>errors.push(error.message));
-  app.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+  let offlineActionInProgress=false;
+  app.on('console',message=>{
+    if(message.type()!=='error') return;
+    if(offlineActionInProgress && /net::ERR_INTERNET_DISCONNECTED/.test(message.text())) return;
+    errors.push(message.text());
+  });
   const base=new URL(page.url());
   const ownerUrl=new URL('/owner',base).href;
   const senderMessage='Ik ben onverwacht ziek. Laat me vooral even weten hoe het gaat.';
@@ -17,6 +22,10 @@ async (page) => {
     checkin:{due:true,next_due_at:1800000000,interval_hours:4}
   };
   const responses=[];
+  const updateRequests=[];
+  app.on('request',request=>{
+    if(new URL(request.url()).pathname.endsWith('/episode-updates')) updateRequests.push(request.postDataJSON());
+  });
   try {
     await app.goto(base.href);
     await app.getByRole('heading',{name:'Neem de rust die je nodig hebt.',exact:false}).waitFor();
@@ -58,6 +67,12 @@ async (page) => {
       responses.push({path,method:request.method()});
       if(path.endsWith('/episode')) return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:episode})});
       if(path.endsWith('/retention')) return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{retention_days:null}})});
+      if(path.endsWith('/episode-updates')) {
+        if(updateRequests.length===1) return route.abort('internetdisconnected');
+        const body=request.postDataJSON();
+        episode.updates.push({command:body.command,message:body.message,recipients:body.recipients,created_at:1800000000});
+        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:episode})});
+      }
       return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{}})});
     });
     await app.goto(ownerUrl);
@@ -84,11 +99,28 @@ async (page) => {
     await app.getByRole('button',{name:'Instellingen',exact:true}).click();
     await app.getByRole('heading',{name:'Servergegevens exporteren'}).waitFor();
     await app.getByLabel('Typ VERWIJDER MIJN SERVERGEGEVENS om te bevestigen',{exact:true}).waitFor();
+    await app.getByRole('button',{name:'Switch language to English',exact:true}).click();
+    await app.getByRole('button',{name:'Home',exact:true}).click();
+    await app.getByRole('button',{name:'Write an update',exact:true}).click();
+    await app.locator('#owner-update-message').fill('I will be offline briefly; this update should be queued once.');
+    await app.locator('#owner-update input[name="recipient"]').check();
+    offlineActionInProgress=true;
+    await context.setOffline(true);
+    await app.getByRole('button',{name:'Queue update',exact:true}).click();
+    await app.getByText('No connection. Your action is saved encrypted on this device. Autofever will retry the same action up to 3 times when you are online again, while Autofever stays open.',{exact:true}).waitFor();
+    check(episode.updates.length===0,'Offline update was presented as accepted before the server responded');
+    await context.setOffline(false);
+    await app.getByText('Server status updated. A queue status is not proof of delivery.',{exact:true}).waitFor({timeout:8000});
+    offlineActionInProgress=false;
+    check(updateRequests.length===2,'Reconnect did not retry the pending update exactly once');
+    check(JSON.stringify(updateRequests[0])===JSON.stringify(updateRequests[1]),'Reconnect generated a new command instead of retrying the same idempotent command');
+    await app.getByText('I will be offline briefly; this update should be queued once.',{exact:true}).waitFor();
+    check(episode.updates.length===1,'Reconnect created a duplicate update');
     check(errors.length===0,`Browser errors: ${errors.join(' | ')}`);
     for(const width of [320,390,1280]) {
       await app.setViewportSize({width,height:844});
       check(await app.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Horizontal overflow at ${width}px`);
     }
-    return 'PASS: profile/settings/owner interface localization, unsaved input preservation, private message preservation and mobile widths';
+    return 'PASS: profile/settings/owner localization, encrypted pending action, bounded idempotent reconnect retry, no premature acceptance, private content and mobile widths';
   } finally { await context.close(); }
 }

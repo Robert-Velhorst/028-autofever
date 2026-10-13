@@ -1,7 +1,8 @@
 'use strict';
 window.AutofeverBridge = (() => {
   let ctx, state = {}, revision = 0, current = null, error = '', working = false, retentionDays = null;
-  let composing = false, updateDraft = null;
+  let composing = false, updateDraft = null, retryTimer = null, retryEpoch = 0;
+  const retryDelays = [1000, 5000, 15000];
   const labels = {queued:'In wachtrij · niet verstuurd',sending:'Wordt aangeboden · uitkomst nog onbekend',accepted:'Aangenomen door de bezorgdienst · bezorging niet bevestigd',failed:'Niet verstuurd · mislukt',uncertain:'Verzenduitkomst onzeker · controle nodig',cancelled:'Geannuleerd · niet verstuurd'};
   const button = (label, action, cls='secondary') => '<button type="button" class="'+cls+'" data-owner-action="'+action+'">'+label+'</button>';
   const escape = value => ctx.esc(value);
@@ -13,6 +14,32 @@ window.AutofeverBridge = (() => {
     await ctx.checkedWrite({connection: await ctx.seal(next)}, {connection: revision});
     revision++;
     state = next;
+  }
+  function stopPendingRetry() {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+    retryEpoch++;
+  }
+  function pendingKey(pending) {
+    return pending ? pending.path + ':' + (pending.body.command || pending.body.episode_id) : '';
+  }
+  function schedulePendingRetry() {
+    if (!state.pending || !navigator.onLine || working || retryTimer !== null) return;
+    const key = pendingKey(state.pending);
+    const attempt = Number.isInteger(state.pending.reconnect_attempts) ? state.pending.reconnect_attempts : 0;
+    if (attempt >= retryDelays.length) return;
+    const epoch = retryEpoch;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      if (epoch !== retryEpoch || !navigator.onLine || !state.pending || pendingKey(state.pending) !== key || working) return;
+      run(async () => {
+        if (!state.pending || pendingKey(state.pending) !== key) return;
+        const reconnect_attempts = Number.isInteger(state.pending.reconnect_attempts) ? state.pending.reconnect_attempts : 0;
+        if (reconnect_attempts >= retryDelays.length) return;
+        await save({...state,pending:{...state.pending,reconnect_attempts:reconnect_attempts+1}});
+        await submitPending();
+      });
+    }, retryDelays[attempt]);
   }
   async function api(path, payload, token = state.token) {
     const response = await fetch('/api/v1/owner/' + path, {
@@ -41,31 +68,37 @@ window.AutofeverBridge = (() => {
     document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-export input,#owner-export button,#owner-retention input,#owner-retention button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
     try { error = ''; await operation(); }
     catch (exc) { error = failure(exc); }
-    finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); }
+    finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); schedulePendingRetry(); }
   }
   async function submitPending() {
     const pending = state.pending;
     if (!pending) return;
     try {
       current = await api(pending.path, pending.body);
+      stopPendingRetry();
       await save({...state,pending:null,...(pending.path === 'episode-updates' ? {updateDraft:null} : {})});
       if(pending.path === 'episode-updates') {composing = false; updateDraft = null;}
       ctx.say('Serverstand bijgewerkt. Een wachtrijstatus is geen bewijs van bezorging.');
     } catch (exc) {
       // These responses precede mutation; unknown/network outcomes retain the same command.
-      if ([400,409,413,415].includes(exc.status)) await save({...state,pending:null});
+      if ([400,409,413,415].includes(exc.status)) {
+        stopPendingRetry();
+        await save({...state,pending:null});
+      }
       throw exc;
     }
   }
   async function refresh() {
     current = await api('episode');
     if (state.pending?.path === 'episode-closures' && current?.id === state.pending.body.episode_id && current.state === state.pending.body.state) {
+      stopPendingRetry();
       await save({...state,pending:null});
     }
     if (state.pending?.path === 'episode-updates' && current?.id === state.pending.body.episode_id) {
       const submitted = state.pending.body;
       if(current.updates?.some(u => u.command === submitted.command && u.message === submitted.message &&
           JSON.stringify([...u.recipients].sort()) === JSON.stringify([...submitted.recipients].sort()))) {
+        stopPendingRetry();
         await save({...state,pending:null,updateDraft:null});
         composing = false; updateDraft = null;
       }
@@ -127,7 +160,15 @@ window.AutofeverBridge = (() => {
   function renderHome(view) {
     if (view !== 'home' || (!state.token && !state.pending) || (!current && !error && !state.pending)) return false;
     let html = '<h1 class="compact-heading" id="owner-title">Jouw melding.</h1>';
-    if (state.pending) html += '<p class="notice">De uitkomst van je laatste actie is nog niet bevestigd. Er wordt geen nieuwe melding gestart.</p>'+button('Uitkomst controleren','resolve','primary');
+    if (state.pending) {
+      const attempts = Number.isInteger(state.pending.reconnect_attempts) ? state.pending.reconnect_attempts : 0;
+      const retryNote = !navigator.onLine
+        ? 'Geen verbinding. Je actie is versleuteld op dit apparaat bewaard. Autofever probeert dezelfde actie maximaal 3 keer opnieuw wanneer je weer online bent en Autofever open blijft.'
+        : attempts >= retryDelays.length
+          ? 'Automatische pogingen zijn gestopt. Je kunt dezelfde actie veilig opnieuw proberen via Uitkomst controleren.'
+          : 'Autofever probeert dezelfde actie maximaal 3 keer met wachttijd opnieuw. De serveruitkomst is nog niet bevestigd.';
+      html += '<p class="notice">De uitkomst van je laatste actie is nog niet bevestigd. Er wordt geen nieuwe melding gestart.</p><p class="hint">'+escape(retryNote)+'</p>'+button('Uitkomst controleren','resolve','primary');
+    }
     if (error) html += '<p class="notice" role="status">'+escape(error)+'</p>';
     if (current) {
       const snap = current.snapshot, prepared = snap.preparation;
@@ -199,6 +240,8 @@ window.AutofeverBridge = (() => {
     const control = event.target.closest('[data-owner-action]');
     if(control && ctx) {event.preventDefault(); action(control.dataset.ownerAction);}
   });
+  window.addEventListener('online', schedulePendingRetry);
+  window.addEventListener('offline', stopPendingRetry);
   document.addEventListener('input', event => {
     if(event.target.id === 'owner-data-delete-confirm') {
       document.querySelector('#owner-data-delete button[type="submit"]').disabled = !ownerDeletePhrase(event.target.value);
@@ -295,6 +338,7 @@ window.AutofeverBridge = (() => {
       const saved = await ctx.request(ctx.db.transaction('vault').objectStore('vault').get('connection'));
       if(saved) {state = await ctx.unseal(saved); revision = saved.revision || 0;}
       if(state.token) {try {await refresh();const retention=await api('retention');retentionDays=retention.retention_days;} catch(exc) {error = failure(exc);}}
+      schedulePendingRetry();
     },
     handles:name => ['activate','recover','cancel'].includes(name), action, renderHome, decorate
   };
