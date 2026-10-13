@@ -21,6 +21,11 @@ OWNER_ROUTES = {
 }
 
 
+def inline_script_hashes(document):
+    return ["'sha256-" + base64.b64encode(hashlib.sha256(script.encode()).digest()).decode() + "'"
+            for script in re.findall(r'<script>(.*?)</script>', document, re.I | re.S)]
+
+
 class OwnerApp(RecipientApp):
     def __init__(self, store, origin, *, https_proxy=False):
         super().__init__(store, origin, https_proxy=https_proxy)
@@ -33,8 +38,7 @@ class OwnerApp(RecipientApp):
         self.assets['/owner'] = (html.encode(), 'text/html; charset=utf-8')
         self.assets['/autofever-i18n.js'] = ((root.parent / 'illness-preview/i18n.js').read_bytes(), 'text/javascript; charset=utf-8')
         self.assets['/owner-bridge.js'] = ((root / 'static/owner-bridge.js').read_bytes(), 'text/javascript; charset=utf-8')
-        hashes = ['\'sha256-' + base64.b64encode(hashlib.sha256(script.encode()).digest()).decode() + '\''
-                  for script in re.findall(r'<script>(.*?)</script>', html, re.S)]
+        hashes = inline_script_hashes(html)
         # Existing preview uses inline style attributes. Scripts require exact content hashes.
         self.owner_csp = ("default-src 'none'; script-src 'self' " + ' '.join(hashes) +
                           "; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; "

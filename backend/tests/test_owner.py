@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from backend.dispatch_lock import delivery_lock
-from backend.owner_web import OwnerApp
+from backend.owner_web import OwnerApp, inline_script_hashes
 from backend.profile import compile_profile
 from backend.service import Store, Conflict, Invalid
 from backend.web import RecipientApp
@@ -293,6 +293,11 @@ class OwnerTests(unittest.TestCase):
         self.app = RecipientApp(self.store, 'http://127.0.0.1:8080')
         for path in ['/owner', '/owner-bridge.js', '/autofever-i18n.js', '/api/v1/owner/episode']:
             self.assertEqual(self.request(path)['status'], 404)
+
+    def test_inline_script_hashes_match_html_tag_case_insensitively(self):
+        script = 'window.autofever = true;'
+        self.assertEqual(inline_script_hashes(f'<script>{script}</script>'),
+                         inline_script_hashes(f'<SCRIPT>{script}</SCRIPT>'))
 
 
 if __name__ == '__main__':
