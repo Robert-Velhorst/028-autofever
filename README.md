@@ -6,6 +6,8 @@ The original idea is intentionally simple: configure the relevant recipients and
 
 > **Project status — 13 October 2026:** a runnable, local-only mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts, profiles, drafts, help preferences, encrypted backup/restore and accessibility settings work locally. Actual delivery, recipient action links, reminders and production hosting are not connected. This is not a production-ready notification service.
 
+The new [backend service core](backend/README.md) implements persistent illness episodes, an encrypted outgoing queue, scoped recipient capabilities and task responses, with isolated synthetic-data tests. It is not connected to the browser, an HTTP service or a real message provider yet. The historical Flask routes below are not this new service's API.
+
 ## Try the Mobile Preview
 
 With Python 3 installed, run this from the repository root:
