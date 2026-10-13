@@ -2,9 +2,29 @@
 
 AutoFever is a low-friction illness-notification application. It allows a user to notify predefined people and connected absence systems when they are temporarily unable to meet work, school, study, caregiving, or other obligations.
 
-The original idea is intentionally simple: configure the relevant recipients once, then use one prominent action when illness makes ordinary communication difficult. AutoFever sends an appropriate absence message, records what was sent, and can later send a recovery or return notification.
+The original idea is intentionally simple: configure the relevant recipients and practical help in advance, then use one prominent action when illness makes ordinary communication difficult. The completed service is intended to send an appropriate absence message, organize optional help, record actual delivery status, and later send a recovery notification. The current preview does not send messages.
 
-> **Project status:** concept and incomplete Python prototype. This repository is not yet a production-ready or independently runnable application. See [Current Repository State](#current-repository-state).
+> **Project status — 13 October 2026:** a runnable, local-only mobile preview is available in [illness-preview](illness-preview/README.md), alongside the incomplete historical Python prototype. Contacts, profiles, drafts, help preferences, encrypted backup/restore and accessibility settings work locally. Actual delivery, recipient action links, reminders and production hosting are not connected. This is not a production-ready notification service.
+
+## Try the Mobile Preview
+
+With Python 3 installed, run this from the repository root:
+
+```sh
+python -m http.server 8000 --bind 127.0.0.1 --directory illness-preview
+```
+
+Open `http://localhost:8000/`. No frontend build is required. Use a browser supporting IndexedDB and Web Crypto; localhost is supported, opening the HTML as a file is not. Keep the host and port stable to keep using the same browser storage. This loopback-only development server is not public or accessible from a separate phone.
+
+The flow is: prepare a profile and contacts → save → press **Ik ben ziek** → inspect the local active snapshot → update, recover or cancel. **No recipient is contacted.** The UI explicitly shows that delivery and task acceptance have not occurred. Clearing site data can lose settings; use the password-encrypted backup first.
+
+For developer checks, with Node.js/npm, PowerShell and Chromium available and the server running:
+
+```powershell
+./illness-preview/verify.ps1 -BaseUrl http://localhost:8000/
+```
+
+See [preview documentation](illness-preview/README.md) for limitations and [verification evidence](illness-preview/VERIFICATION.md) for the boundary between local tests and real delivery. No app account is required for this local preview.
 
 ## Why AutoFever Exists
 
@@ -57,14 +77,14 @@ Importing a contact must never automatically authorize the disclosure of illness
 
 The primary interface contains one prominent illness action. Activating it should:
 
-1. select the preconfigured recipient groups;
-2. optionally collect expected duration, return date, or a custom note;
-3. generate the appropriate message for each audience;
-4. show a concise final preview of recipients and disclosed information;
-5. require an explicit send confirmation;
-6. send immediately or place the notification in a durable offline queue;
-7. display delivery and failure status without demanding further work from the user;
-8. start an illness episode for later recovery follow-up.
+1. use the saved default profile, not unsaved drafts;
+2. snapshot the configured recipients, messages and practical help;
+3. activate immediately with that single deliberate action, without a second confirmation or last-minute questionnaire;
+4. send through configured, authorized channels once the delivery backend exists;
+5. display actual delivery and failure status without demanding further work from the user;
+6. start an illness episode for later updates, help coordination and recovery.
+
+Recipient/disclosure review and optional duration or message editing belong in preparation, before saving. This one-press rule follows the owner's explicit product decision. The local preview currently stops at a local snapshot; it has no working online or offline delivery queue.
 
 The default message should disclose no more than necessary. A neutral formulation such as “I am unavailable today for health reasons” should be available for users who do not want to state that they have a fever or another illness.
 
@@ -138,7 +158,7 @@ A provider accepting a message is not the same as confirmed delivery, and delive
 - confirmation that is accessible without relying on color alone;
 - plain-language status and error messages.
 
-Voice activation must still lead to a clear recipient-and-message confirmation before information is transmitted.
+Voice activation is planned, not implemented. It must activate only previously authorized saved settings; its accidental-activation safeguards still need design and verification. Do not silently add a second confirmation to the agreed one-button manual flow.
 
 ### Feedback and acknowledgment
 
@@ -152,7 +172,7 @@ Illness information can be health data and therefore requires particularly caref
 - device-first processing where practical;
 - encryption at rest and in transit;
 - explicit authorization for recipients, channels, and integrations;
-- a final disclosure preview before sending;
+- a disclosure preview when configuring the saved plan, before activation;
 - configurable local retention and complete deletion;
 - no advertising use or sale of health, contact, or communication data;
 - no continuous health surveillance;
@@ -275,7 +295,18 @@ These routes document prototype intent only. They are not a stable or secured pu
 
 ## Current Repository State
 
-The repository currently contains an incomplete prototype rather than a coherent application distribution.
+The repository contains two separate development artifacts: a runnable browser preview and incomplete historical Python code. Neither is the completed online service.
+
+### Current mobile preview
+
+- `illness-preview/index.html`: Dutch mobile-first interface, local encrypted storage and backup/restore.
+- `illness-preview/tests/`: six browser suites and the test-runner contract checks.
+- `illness-preview/verify.ps1`: pinned Playwright CLI runner using isolated synthetic test contexts.
+- `illness-preview/README.md` and `VERIFICATION.md`: actual functionality, execution instructions and remaining gates.
+
+Profile editing, per-person messages, separate drafts, helper timing/repeat/backup preferences, active snapshots, local updates/recovery and large-text/high-contrast preferences are implemented here. Choosing a channel, repetition or reserve helper does not execute it. Help acceptance/completion requires the still-missing private recipient flow.
+
+The correct preview was copied as source files only onto the current clean Git history. The rejected automotive implementation and old Git history are not part of this integration.
 
 ### AutoFever material
 
@@ -291,7 +322,7 @@ The existing fix report says that tests passed in an earlier environment, but th
 
 ## Running the Project
 
-There is currently no supported installation or run procedure. Do not treat the standalone Python files as a production deployment.
+Use [Try the Mobile Preview](#try-the-mobile-preview) for the supported local browser preview. There is no supported complete-service installation yet. Do not treat the standalone Python files as a production deployment.
 
 Before adding run instructions, the repository needs:
 
@@ -310,7 +341,7 @@ The first credible release should contain:
 - guided setup for identity, contacts, groups, and templates;
 - one prominent illness action;
 - optional duration, return date, and custom note;
-- final recipient and disclosure confirmation;
+- recipient and disclosure review during setup, with immediate activation of the saved plan;
 - at least one reliable delivery adapter;
 - encrypted local configuration;
 - offline queue and duplicate-send prevention;
@@ -327,7 +358,7 @@ Formal attendance-system integration should be introduced only after the core no
 A release is not ready until:
 
 1. no notification can be sent without an explicit, reviewable user action;
-2. the final preview accurately lists every recipient, channel, and disclosed field;
+2. the saved-plan preview accurately lists every recipient, channel, and disclosed field, and one-press activation uses that saved snapshot without an extra confirmation;
 3. queued retries cannot produce duplicate messages;
 4. offline and restart recovery are tested;
 5. delivery, acknowledgment, and formal absence acceptance remain distinct states;
@@ -343,8 +374,15 @@ A release is not ready until:
 
 ### Phase 1 — Repository recovery
 
-- restore the missing AutoFever modules, templates, and tests;
-- establish reproducible development tooling.
+- preserve the clean repository history and the separately runnable illness preview;
+- retain historical Python material without claiming its missing modules work;
+- establish reproducible backend and integration tests alongside the existing browser suites.
+
+### Hosting decision
+
+Deploy `028-autofever` as a separate application on the existing Hetzner server named `013-hire-ai`. Preserve that server name and Hire.ai's installation and data. Autofever needs separate configuration, secrets, storage and lifecycle management. Do not provision a separate server or purchase a capacity upgrade without the owner's approval.
+
+Autofever has not been deployed by this integration. Authenticated host inspection, measured shared-host capacity, HTTPS/domain configuration, a real notification provider and recovery acceptance remain open. Publishing source files is not deployment.
 
 ### Phase 2 — Private MVP
 
