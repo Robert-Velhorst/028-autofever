@@ -1,8 +1,8 @@
 # Test-only Linux image. No production secrets, ports, volumes or mail provider.
 FROM python:3.11-slim-bookworm@sha256:0a310eeecf4e1f5a0743f9a6520c90c88d089c903ca5fd283f501e3a805f5f89
 WORKDIR /app
-COPY backend/requirements.txt /app/backend/requirements.txt
-RUN python -m pip install --no-cache-dir -r backend/requirements.txt
+COPY backend/requirements.lock /app/backend/requirements.lock
+RUN python -m pip install --no-cache-dir --require-hashes -r backend/requirements.lock
 COPY backend/*.py /app/backend/
 COPY backend/smtp.example.json /app/backend/
 COPY backend/tests/*.py /app/backend/tests/

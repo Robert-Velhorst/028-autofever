@@ -1,5 +1,12 @@
 # AutoFever Code Fixes and Optimizations Report
 
+> **Historical and superseded report.** This text describes an earlier, different
+> source tree and claims validation that is not reproducible from this checkout.
+> The `/src/...` paths below do not exist here, and the original report's test
+> claims were not verified. Do not use it as evidence of current implementation
+> or test status. See the root README and `deploy/README.md` for current,
+> commit-specific status and verification.
+
 ## Overview
 
 This report summarizes the code fixes and optimizations implemented in the AutoFever application. The review identified several issues and optimization opportunities, which have been addressed to improve stability, performance, and security.

@@ -1,5 +1,13 @@
 # AutoFever Code Review Findings
 
+> **Historical and superseded review.** Findings below reference files and
+> modules from a prior source tree; those paths are not the supported runtime in
+> this checkout. They have not been revalidated against current code. Do not
+> treat this document as a current security review or implementation backlog.
+> Current product boundaries, supported components and verification evidence
+> are in `README.md` and `deploy/README.md`; open roadmap acceptance criteria are
+> maintained in the repository's GitHub issues.
+
 ## Overview
 
 This document outlines bugs, inefficiencies, and optimization opportunities identified during a comprehensive code review of the AutoFever application. The review focused on the main application file and key services including contact management, smart notifications, AI contact suggestion, and offline support.

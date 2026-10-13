@@ -15,9 +15,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend tests (Linux)
+  runtime_matrix:
+    name: Load supported backend matrix
     runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.read.outputs.backend }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Read supported Python and OS targets
+        id: read
+        shell: bash
+        run: |
+          python -c "import json; from pathlib import Path; data=json.loads(Path('backend/runtime-matrix.json').read_text()); assert data.get('backend') and all(set(item)=={'os','python'} for item in data['backend']); print('backend='+json.dumps(data['backend'], separators=(',', ':')))" >> "$GITHUB_OUTPUT"
+
+  backend:
+    name: Backend tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: runtime_matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.runtime_matrix.outputs.backend) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -26,10 +46,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
 
       - name: Install pinned backend dependencies
-        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt
+        run: python -m pip install --disable-pip-version-check --require-hashes -r backend/requirements.lock
 
       - name: Check dependency consistency
         run: python -m pip check

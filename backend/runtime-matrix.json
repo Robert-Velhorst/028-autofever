@@ -1,0 +1,12 @@
+{
+  "backend": [
+    {
+      "os": "ubuntu-latest",
+      "python": "3.11"
+    },
+    {
+      "os": "windows-latest",
+      "python": "3.11"
+    }
+  ]
+}
