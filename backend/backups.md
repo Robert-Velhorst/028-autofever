@@ -138,6 +138,11 @@ business-state proof, protection from a key-holding attacker, or provider-histor
 reconciliation. The exact v1 schema comparison is intentionally strict: future
 schema changes need an explicit supported backup/restore version.
 
+Private [owner enrollment](provisioning.md) adds authenticated `provision:` audit
+records, now recognized by this verifier. They contain hashes, not raw owner
+capabilities. Earlier verifier releases intentionally refuse these unknown records;
+use the current compatible release to verify newer archives.
+
 Temporary snapshots live in restricted, uniquely named directories under the
 chosen output/working directory, not inside Hire.ai or a shared database. They
 retain the ordinary database's visible metadata; handle them as private data.

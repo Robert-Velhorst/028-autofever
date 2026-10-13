@@ -42,9 +42,9 @@ Use local storage with real file-lock semantics; no NFS/SMB shared SQLite. All d
 
 ## Local and Linux verification
 
-Checkpoint, 13 October 2026: the current Windows/Python 3.11.15 suite runs 122 backend cases successfully, with one skipped because this Windows environment cannot create symlinks. It includes 24 new backup/recovery-copy cases. `pip check` also passes. Resource warnings are treated as errors.
+Checkpoint, 13 October 2026: the current Windows/Python 3.11.15 suite runs 139 backend cases successfully, with one skipped because this Windows environment cannot create symlinks. It includes 24 backup/recovery-copy cases and 17 owner-provisioning cases. Provisioning tests include actual subprocess death before commit and after the first SQL insert, plus a real loopback owner HTTP flow. `pip check` passes for the unchanged environment. Resource warnings are treated as errors.
 
-The **previous 98-case baseline**, before backup/recovery-copy changes, passed on Windows and in a non-root, network-isolated Linux x86_64 container/Python 3.11.17. It comprises 86 service/HTTP/SMTP/reconciliation cases plus 12 hosted-boundary cases. The current Linux image rebuild has not completed: the local Docker engine is unresponsive, including a bounded connection check to its configured named pipe. Do not treat the earlier Linux result as verification of the new backup code. Linux backup/restore verification remains open; the shared Docker environment was not restarted.
+The **previous 98-case baseline**, before backup/recovery-copy changes, passed on Windows and in a non-root, network-isolated Linux x86_64 container/Python 3.11.17. It comprises 86 service/HTTP/SMTP/reconciliation cases plus 12 hosted-boundary cases. The previous image rebuild failed with a Docker engine HTTP 500. After the engine responded again, a new build was started, but current Linux verification has not completed. Do not treat the earlier Linux result as verification of backup or provisioning changes. Linux verification remains open; the shared Docker environment was not restarted by this work.
 
 The baseline uses cryptography 46.0.7, Waitress 3.0.2, cffi 2.1.1 and pycparser 3.11 on both platforms; dependencies are unchanged. The unchanged Caddy fragment previously passed `caddy validate` in an isolated container using image digest `sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f` and synthetic configuration. No public listener or real TLS certificate was created. The systemd template has not been installed or executed on the target host.
 
@@ -78,7 +78,7 @@ After trusted provisioning of a dedicated store and owner capability, use local 
 backend/.venv/bin/python -m backend.hosted --database /var/lib/028-autofever/state.sqlite3 --key-file /private/store-key --proxy-key-file /private/proxy-key --origin https://autofever.example.invalid --check
 ```
 
-`--check` reads/validates configuration and the existing store, without opening a listening socket or contacting a provider. It does not prove the proxy, hostname, credentials transfer or capacity. `--serve` explicitly starts the loopback server instead. No startup mode is implicit, no database is silently created and no owner capability is printed. Initial trusted store/owner provisioning still uses the service API; user-friendly enrollment, rotation and recovery are separate unfinished work.
+`--check` reads/validates configuration and the existing store, without opening a listening socket or contacting a provider. It does not prove the proxy, hostname, credentials transfer or capacity. `--serve` explicitly starts the loopback server instead. No startup mode is implicit, no database is silently created and no owner capability is printed. Initial trusted store/owner provisioning now has a [dedicated local CLI](../backend/provisioning.md) with private output files and explicit crash-safe resume. Nontechnical onboarding/transfer, credential rotation/revocation and device recovery are separate unfinished work.
 
 ## Request limits, health and logs
 

@@ -3,3 +3,6 @@
 .autofever-backup-*/
 .autofever-restore-*/
 .autofever-verify-*/
+*.afkey
+*.afowner
+.autofever-provision-*/

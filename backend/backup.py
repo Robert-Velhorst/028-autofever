@@ -110,6 +110,14 @@ def validate_database(path, key):
                 if not isinstance(value, dict) or set(value) != {
                         'decision', 'attempt', 'outcome', 'retry', 'result', 'recorded_at'}:
                     raise Invalid('Invalid reconciliation record')
+            elif re.fullmatch(r'provision:[0-9a-f-]{36}', name):
+                if (not isinstance(value, dict) or set(value) !=
+                        {'version', 'owner_hash', 'credential_digest', 'created_at'} or
+                        type(value['version']) is not int or value['version'] != 1 or
+                        type(value['created_at']) is not int or value['created_at'] < 0 or
+                        any(not isinstance(value[k], str) or not re.fullmatch(r'[0-9a-f]{64}', value[k])
+                            for k in ('owner_hash', 'credential_digest'))):
+                    raise Invalid('Invalid owner enrollment record')
             else:
                 raise Invalid('Unsupported metadata')
         if not checked:
