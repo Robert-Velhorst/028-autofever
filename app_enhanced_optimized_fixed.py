@@ -172,7 +172,7 @@ class AutoFeverApp:
             return self.onboarding_wizard.start_wizard()
         except Exception as e:
             logger.error(f"Error starting onboarding: {str(e)}")
-            return {"error": "Failed to start onboarding", "details": str(e)}
+            return {"error": "Failed to start onboarding"}
     
     def complete_onboarding(self):
         """Complete the onboarding process."""
@@ -192,7 +192,7 @@ class AutoFeverApp:
             return {"success": True}
         except Exception as e:
             logger.error(f"Error completing onboarding: {str(e)}")
-            return {"error": "Failed to complete onboarding", "details": str(e)}
+            return {"error": "Failed to complete onboarding"}
     
     def _cache_data_for_offline(self):
         """Cache data for offline use."""
@@ -391,7 +391,7 @@ class AutoFeverApp:
             return self._process_notification(True, severity, duration, custom_message)
         except Exception as e:
             logger.error(f"Error activating illness: {str(e)}")
-            return {"error": "Failed to activate illness", "details": str(e)}
+            return {"error": "Failed to activate illness"}
     
     def activate_recovery(self, custom_message=None):
         """
@@ -407,7 +407,7 @@ class AutoFeverApp:
             return self._process_notification(False, custom_message=custom_message)
         except Exception as e:
             logger.error(f"Error activating recovery: {str(e)}")
-            return {"error": "Failed to activate recovery", "details": str(e)}
+            return {"error": "Failed to activate recovery"}
     
     def _count_recipients(self, group_ids):
         """
@@ -525,7 +525,7 @@ class AutoFeverApp:
             return results
         except Exception as e:
             logger.error(f"Error optimizing resources: {str(e)}")
-            return {"error": "Failed to optimize resources", "details": str(e)}
+            return {"error": "Failed to optimize resources"}
     
     def _is_app_in_background(self):
         """
@@ -601,7 +601,7 @@ class AutoFeverApp:
             return {'success': True}
         except Exception as e:
             logger.error(f"Error during shutdown: {str(e)}")
-            return {"error": "Failed to shutdown properly", "details": str(e)}
+            return {"error": "Failed to shutdown properly"}
 
 
 # Flask application factory
@@ -647,7 +647,7 @@ def create_app():
             return jsonify(result)
         except Exception as e:
             logger.error(f"Error in activate-illness endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/activate-recovery', methods=['POST'])
     def activate_recovery():
@@ -668,7 +668,7 @@ def create_app():
             return jsonify(result)
         except Exception as e:
             logger.error(f"Error in activate-recovery endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/contacts')
     def get_contacts():
@@ -693,7 +693,7 @@ def create_app():
             return jsonify(groups)
         except Exception as e:
             logger.error(f"Error in contacts endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/templates')
     def get_templates():
@@ -709,7 +709,7 @@ def create_app():
             return jsonify(templates)
         except Exception as e:
             logger.error(f"Error in templates endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/settings', methods=['GET', 'POST'])
     def settings():
@@ -773,7 +773,7 @@ def create_app():
                 })
         except Exception as e:
             logger.error(f"Error in settings endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/statistics')
     def get_statistics():
@@ -782,7 +782,7 @@ def create_app():
             return jsonify(autofever.feedback_service.get_usage_statistics())
         except Exception as e:
             logger.error(f"Error in statistics endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/resource-usage')
     def get_resource_usage():
@@ -791,7 +791,7 @@ def create_app():
             return jsonify(autofever.get_resource_usage())
         except Exception as e:
             logger.error(f"Error in resource-usage endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/optimize-resources')
     def optimize_resources():
@@ -800,7 +800,7 @@ def create_app():
             return jsonify(autofever.optimize_resources())
         except Exception as e:
             logger.error(f"Error in optimize-resources endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/acknowledge/<token>')
     def acknowledge(token):
@@ -817,7 +817,7 @@ def create_app():
             return render_template('acknowledge.html', token=token)
         except Exception as e:
             logger.error(f"Error in acknowledge endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/acknowledge', methods=['POST'])
     def process_acknowledgment():
@@ -842,7 +842,7 @@ def create_app():
             return jsonify(result)
         except Exception as e:
             logger.error(f"Error in process-acknowledgment endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/voice-command', methods=['POST'])
     def voice_command():
@@ -864,7 +864,7 @@ def create_app():
             return jsonify(result)
         except Exception as e:
             logger.error(f"Error in voice-command endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     @app.route('/api/sync-status')
     def sync_status():
@@ -873,7 +873,7 @@ def create_app():
             return jsonify(autofever.offline_support_service.get_sync_status())
         except Exception as e:
             logger.error(f"Error in sync-status endpoint: {str(e)}")
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": "Internal server error"}), 500
     
     # Error handlers
     @app.errorhandler(400)
