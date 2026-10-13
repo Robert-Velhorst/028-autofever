@@ -1,0 +1,13 @@
+# Install only after reviewing the service and confirming this host's UTC/local-time policy.
+[Unit]
+Description=Daily 028-autofever opt-in history cleanup
+
+[Timer]
+OnCalendar=*-*-* 02:17:00 UTC
+Persistent=true
+RandomizedDelaySec=30m
+AccuracySec=1m
+Unit=028-autofever-retention.service
+
+[Install]
+WantedBy=timers.target

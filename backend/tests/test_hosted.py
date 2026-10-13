@@ -56,6 +56,18 @@ class HostedTests(unittest.TestCase):
         self.app = RecipientApp(self.store, self.origin, https_proxy=True)
         self.assertEqual(self.request('/help')['status'], 403)
 
+    def test_owner_retention_policy_stays_inside_authenticated_https_host_boundary(self):
+        path = '/api/v1/owner/retention'
+        read = self.request(path)
+        self.assertEqual(read['status'], 200)
+        self.assertEqual(json.loads(read['body'])['data'], {'retention_days': None})
+        saved = self.request('/api/v1/owner/retention-setting', 'POST', {'retention_days': 90})
+        self.assertEqual(saved['status'], 200)
+        self.assertEqual(self.store.retention_days(self.owner), 90)
+        self.assertEqual(self.request(path, HTTP_X_AUTOFEVER_PROXY_KEY='')['status'], 403)
+        self.assertEqual(self.request('/api/v1/owner/retention-setting', 'POST', {'retention_days': 90},
+                                      HTTP_ORIGIN='https://other.invalid')['status'], 403)
+
     def test_requires_exact_peer_secret_protocol_client_ip_and_host(self):
         for changes in ({'REMOTE_ADDR':'192.0.2.2'}, {'HTTP_X_AUTOFEVER_PROXY_KEY':''},
                         {'HTTP_X_AUTOFEVER_PROXY_KEY':'b'*64}, {'HTTP_X_AUTOFEVER_PROXY_KEY':'☀'},

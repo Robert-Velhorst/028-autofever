@@ -20,7 +20,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from backend.dispatch_lock import delivery_lock
 from backend.hosted import read_secret
 from backend.service import (Invalid, RecordCodec, SCHEMA, SCHEMA_V3, snapshot,
-                             validate_access, validate_checkin_record, validate_update)
+                             validate_access, validate_checkin_record, validate_closure_record, validate_retention_record,
+                             validate_update)
 
 
 MAGIC = b'AUTOFEVER-BACKUP\x01'
@@ -116,6 +117,18 @@ def validate_database(path, key):
                 if (db.execute('PRAGMA user_version').fetchone()[0] not in (2, 3) or
                         not db.execute('SELECT 1 FROM owners WHERE id=?', (value['owner_hash'],)).fetchone()):
                     raise Invalid('Invalid owner access binding or database version')
+            elif re.fullmatch(r'retention:[0-9a-f]{64}', name):
+                policy = validate_retention_record(value)
+                owner = name.split(':', 1)[1]
+                if (policy['retention_days'] is None or
+                        not db.execute('SELECT 1 FROM owners WHERE id=?', (owner,)).fetchone()):
+                    raise Invalid('Invalid retention policy binding')
+            elif re.fullmatch(r'closure:[0-9a-f-]{36}', name):
+                record = validate_closure_record(value)
+                eid = name.split(':', 1)[1]
+                episode = db.execute('SELECT created,state FROM episodes WHERE id=?', (eid,)).fetchone()
+                if episode is None or episode[1] == 'active' or record['closed_at'] < episode[0]:
+                    raise Invalid('Invalid closure timestamp binding')
             elif re.fullmatch(r'update:[0-9a-f-]{36}:[A-Za-z0-9_-]{1,128}', name):
                 validate_update(value)
                 _, eid, command = name.split(':')

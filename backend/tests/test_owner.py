@@ -265,7 +265,10 @@ class OwnerTests(unittest.TestCase):
         self.assertNotIn("script-src 'unsafe-inline'", csp)
         self.assertNotIn(self.owner.encode(), page['body'])
         self.assertIn(b'/owner-bridge.js', page['body'])
-        self.assertEqual(self.request('/owner-bridge.js')['status'], 200)
+        bridge = self.request('/owner-bridge.js')
+        self.assertEqual(bridge['status'], 200)
+        self.assertIn(b'owner-retention-days', bridge['body'])
+        self.assertIn(b'retention-setting', bridge['body'])
         self.app = RecipientApp(self.store, 'http://127.0.0.1:8080')
         for path in ['/owner', '/owner-bridge.js', '/api/v1/owner/episode']:
             self.assertEqual(self.request(path)['status'], 404)

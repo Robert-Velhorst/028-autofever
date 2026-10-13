@@ -1,0 +1,31 @@
+# Review paths, credentials, ownership and schedule against the existing host before installing.
+[Unit]
+Description=028-autofever opt-in history retention
+After=local-fs.target
+ConditionPathIsRegularFile=/var/lib/028-autofever/state.sqlite3
+
+[Service]
+Type=oneshot
+User=autofever
+Group=autofever
+WorkingDirectory=/opt/028-autofever/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=store-key:/etc/028-autofever/store-key
+ExecStart=/opt/028-autofever/current/backend/.venv/bin/python -m backend.retention --database /var/lib/028-autofever/state.sqlite3 --key-file ${CREDENTIALS_DIRECTORY}/store-key --purge --limit 100
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/028-autofever
+MemoryMax=192M
+CPUQuota=30%
+TasksMax=16
+LimitNOFILE=128

@@ -1,6 +1,6 @@
 'use strict';
 window.AutofeverBridge = (() => {
-  let ctx, state = {}, revision = 0, current = null, error = '', working = false;
+  let ctx, state = {}, revision = 0, current = null, error = '', working = false, retentionDays = null;
   let composing = false, updateDraft = null;
   const labels = {queued:'In wachtrij · niet verstuurd',sending:'Wordt aangeboden · uitkomst nog onbekend',accepted:'Aangenomen door de bezorgdienst · bezorging niet bevestigd',failed:'Niet verstuurd · mislukt',uncertain:'Verzenduitkomst onzeker · controle nodig',cancelled:'Geannuleerd · niet verstuurd'};
   const button = (label, action, cls='secondary') => '<button type="button" class="'+cls+'" data-owner-action="'+action+'">'+label+'</button>';
@@ -24,6 +24,7 @@ window.AutofeverBridge = (() => {
   function failure(exc) {
     if (exc.code === 'STALE') return 'De koppeling of het profiel is in een andere tab gewijzigd. Herlaad voordat je verdergaat.';
     if (exc.path === 'data-deletion' && exc.status === 409) return 'Servergegevens zijn niet gewist: er is een actieve of onzekere bezorgpoging. Los die eerst op en probeer daarna opnieuw.';
+    if (exc.path === 'retention-setting' && exc.status === 400) return 'Kies uitzetten of een hele bewaartermijn van 1 tot 3650 dagen.';
     if (exc.path === 'episode-updates' && [400,413].includes(exc.status)) return 'Controleer je update: maximaal 2000 tekens en minstens één geldige ontvanger.';
     if (exc.status === 400) return 'Het opgeslagen profiel wordt nog niet ondersteund. Controleer ontvangers en gebruik per persoon één e-mail-, SMS- of WhatsApp-kanaal. Telefoonnummers beginnen met +landcode.';
     if (exc.status === 413) return 'Dit profiel is te groot voor de server. Verklein het voordat je opnieuw start.';
@@ -34,7 +35,7 @@ window.AutofeverBridge = (() => {
   async function run(operation) {
     if (working) return;
     working = true;
-    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-export input,#owner-export button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
+    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button,#owner-export input,#owner-export button,#owner-retention input,#owner-retention button,#owner-data-delete input,#owner-data-delete button').forEach(b => b.disabled = true);
     try { error = ''; await operation(); }
     catch (exc) { error = failure(exc); }
     finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); }
@@ -187,6 +188,7 @@ window.AutofeverBridge = (() => {
       if(hint) hint.textContent='De server bewaart de melding en wachtrij. Zonder bezorgdienst worden er geen berichten verstuurd. Check-ins zijn zichtbaar zodra je Autofever opent; herhaalde hulp en reservehelpers zijn nog niet geautomatiseerd.';
     }
     if (view !== 'settings') return;
+    document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Automatische bewaartermijn</h2><p class="hint">Standaard staat dit uit. Kies alleen als je wilt dat oude, afgesloten ziekmeldingen en hun servergeschiedenis automatisch uit de live database verdwijnen. Actieve meldingen en berichten met een open, lopende of onzekere bezorgstatus worden nooit opgeruimd. Bewaartermijn werkt pas automatisch wanneer de beheerder de dagelijkse Autofever-opschoontaak op de server heeft ingeschakeld. Exports, serverback-ups en kopieën bij ontvangers vallen hier niet onder.</p><form id="owner-retention"><label for="owner-retention-days">Bewaar geschiedenis na afsluiten (dagen; leeg = uit)</label><input id="owner-retention-days" type="number" min="1" max="3650" step="1" value="'+escape(retentionDays ?? '')+'"'+(!state.token?' disabled':'')+'><p class="hint">1 tot 3650 dagen. Een kortere termijn kan bij de eerstvolgende dagelijkse opschoningsrun direct geschiedenis verwijderen.</p><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Bewaartermijn opslaan</button></div></form></section>');
     document.querySelector('main .intro').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens exporteren</h2><p class="hint">Dit bevat je serverhistorie: ziekte- en herstelberichten, contactgegevens, helperstatus en check-ins. De download wordt eerst met een aparte wachtzin versleuteld. Bewaar die wachtzin los van het bestand. Dit exporteert niet je lokale profielen; gebruik daarvoor de gewone Autofever-back-up.</p><form id="owner-export"><label for="owner-export-password">Wachtzin voor de serverexport</label><input id="owner-export-password" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><label for="owner-export-confirm">Herhaal de wachtzin</label><input id="owner-export-confirm" type="password" autocomplete="new-password" minlength="14" maxlength="1024" required><p class="hint">Minstens 14 tekens. De wachtzin wordt niet opgeslagen of naar de server gestuurd.</p><div class="actions"><button class="secondary" type="submit"'+(!state.token?' disabled':'')+'>Versleutelde serverexport downloaden</button></div></form></section><section class="section-gap"><h2>Lokale server koppelen</h2><p class="hint">Eenmalige privésleutel van de beheerder, geen nieuw account. Alleen deze server op dit adres. Bewaar de sleutel apart; de profielback-up bevat hem niet. De sleutel wordt hier versleuteld opgeslagen, met de browsersleutel op hetzelfde apparaat.</p>'+(state.token?'<p class="hint">Koppeling bewaard. Verlopen hulplinks sluiten na '+escape(state.hours)+' uur.</p>':'')+'<form id="owner-connect"><label for="owner-token">Privésleutel voor jouw meldingen</label><input id="owner-token" type="password" autocomplete="off" maxlength="43" required><label for="owner-hours">Geldigheid hulplink in uren</label><input id="owner-hours" type="number" min="1" max="168" value="'+escape(state.hours||24)+'" required><div class="actions"><button class="primary" type="submit">Koppeling controleren en bewaren</button></div></form><p class="hint">Terugzetten van een profielback-up wijzigt geen lopende servermelding. Meerdere kanalen per persoon en push zijn nog niet aangesloten; kies voor deze koppeling één beginkanaal.</p></section>');
     document.querySelector('#owner-export').closest('section').insertAdjacentHTML('afterend', '<section class="section-gap"><h2>Servergegevens wissen</h2><p class="hint">Dit verwijdert je live serverhistorie: ziekte- en herstelteksten, contactgegevens, helpers, check-ins en de berichtenwachtrij. Klaarstaande berichten worden verwijderd; eerder bezorgde berichten kunnen niet worden teruggehaald. Je lokale profielen en serverkoppeling blijven bewaard. Gegevens in operatorback-ups of bij ontvangers worden niet door deze actie gewist.</p><form id="owner-data-delete"><label for="owner-data-delete-confirm">Typ VERWIJDER MIJN SERVERGEGEVENS om te bevestigen</label><input id="owner-data-delete-confirm" type="text" autocomplete="off" maxlength="64" required><p class="hint">Niet mogelijk zolang een verzending bezig is of een provideruitkomst onzeker is; die moet eerst worden opgelost.</p><div class="actions"><button class="text-button" type="submit"'+(!state.token?' disabled':'')+'>Alle servergegevens verwijderen</button></div></form></section>');
   }
@@ -208,6 +210,22 @@ window.AutofeverBridge = (() => {
   document.addEventListener('input',captureUpdate);
   document.addEventListener('change',captureUpdate);
   document.addEventListener('submit', event => {
+    if(event.target.id === 'owner-retention' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      run(async () => {
+        if(!state.token || state.pending) throw {userMessage:'Koppel eerst de server en rond een eventuele onzekere actie af.'};
+        const raw=document.getElementById('owner-retention-days').value.trim();
+        const days=raw===''?null:Number(raw);
+        if(days!==null && (!Number.isInteger(days)||days<1||days>3650)) throw {userMessage:'Kies uitzetten of een hele bewaartermijn van 1 tot 3650 dagen.'};
+        if(days!==null && (retentionDays===null || days<retentionDays) &&
+           !confirm('Deze kortere bewaartermijn kan bij de volgende dagelijkse serveropschoning oude, afgesloten geschiedenis definitief uit de live database verwijderen. Back-ups en ontvangerkopieën blijven bestaan. Doorgaan?')) return;
+        const result=await api('retention-setting',{retention_days:days});
+        if(result?.retention_days!==days) throw {userMessage:'De server heeft de nieuwe bewaartermijn niet bevestigd. Haal de instelling opnieuw op.'};
+        retentionDays=days;
+        ctx.say(days===null?'Automatische bewaartermijn uitgezet.':'Bewaartermijn opgeslagen. Opschonen gebeurt alleen wanneer de servertaak actief is.');
+      });
+      return;
+    }
     if(event.target.id === 'owner-data-delete' && ctx) {
       event.preventDefault(); event.stopImmediatePropagation();
       run(async () => {
@@ -261,7 +279,10 @@ window.AutofeverBridge = (() => {
       const hours = Number(document.getElementById('owner-hours').value);
       if(!/^[A-Za-z0-9_-]{43}$/.test(token) || !Number.isInteger(hours) || hours < 1 || hours > 168) throw {userMessage:'Gebruik de volledige privésleutel en een geldigheid van 1 tot 168 uur.'};
       const result = await api('episode',undefined,token);
+      const retention = await api('retention',undefined,token);
+      if(!retention || !(retention.retention_days===null || (Number.isInteger(retention.retention_days)&&retention.retention_days>=1&&retention.retention_days<=3650))) throw {userMessage:'De server gaf geen geldige bewaartermijn terug.'};
       await save({token,hours,pending:null}); current = result;
+      retentionDays = retention.retention_days;
       ctx.say('Koppeling gecontroleerd en bewaard. Er is niets verstuurd.');
     });
   },true);
@@ -270,7 +291,7 @@ window.AutofeverBridge = (() => {
       ctx = context;
       const saved = await ctx.request(ctx.db.transaction('vault').objectStore('vault').get('connection'));
       if(saved) {state = await ctx.unseal(saved); revision = saved.revision || 0;}
-      if(state.token) {try {await refresh();} catch(exc) {error = failure(exc);}}
+      if(state.token) {try {await refresh();const retention=await api('retention');retentionDays=retention.retention_days;} catch(exc) {error = failure(exc);}}
     },
     handles:name => ['activate','recover','cancel'].includes(name), action, renderHome, decorate
   };

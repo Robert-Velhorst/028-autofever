@@ -199,6 +199,23 @@ def validate_checkin_record(value):
     return value
 
 
+def validate_retention_record(value):
+    if (not isinstance(value, dict) or set(value) != {'version', 'retention_days'} or
+            type(value['version']) is not int or value['version'] != 1 or
+            (value['retention_days'] is not None and
+             (type(value['retention_days']) is not int or not 1 <= value['retention_days'] <= 3650))):
+        raise Invalid('Invalid retention policy')
+    return value
+
+
+def validate_closure_record(value):
+    if (not isinstance(value, dict) or set(value) != {'version', 'closed_at'} or
+            type(value['version']) is not int or value['version'] != 1 or
+            type(value['closed_at']) is not int or value['closed_at'] < 0):
+        raise Invalid('Invalid episode closure record')
+    return value
+
+
 class RecordCodec:
     """Record encryption shared by the live store and offline backup verifier."""
 
@@ -424,6 +441,89 @@ class Store(RecordCodec):
                     'episodes': [{'created_at': row['created'],
                                   **self._episode_view(db, row, include_closed_checkin=True)} for row in rows]}
 
+    def retention_days(self, owner_token):
+        with self.transaction() as db:
+            owner = self._owner(db, owner_token)
+            identity = 'retention:' + owner
+            row = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+            if row is None:
+                return None
+            return validate_retention_record(self.open(identity, row['value']))['retention_days']
+
+    def set_retention_days(self, owner_token, days):
+        validate_retention_record({'version': 1, 'retention_days': days})
+        with self.transaction() as db:
+            owner = self._owner(db, owner_token)
+            identity = 'retention:' + owner
+            if days is None:
+                db.execute('DELETE FROM metadata WHERE name=?', (identity,))
+            else:
+                db.execute('INSERT OR REPLACE INTO metadata VALUES (?,?)',
+                           (identity, self.seal(identity, {'version': 1, 'retention_days': days})))
+        return days
+
+    def purge_expired_history(self, *, limit=100):
+        """Delete only opted-in, old, closed episodes without pending send outcomes.
+
+        The shared delivery lock excludes dispatch/reconciliation for the full
+        operation. A bounded batch keeps the SQLite write transaction short;
+        repeated scheduled runs safely catch up after a backlog.
+        """
+        if type(limit) is not int or not 1 <= limit <= 1000:
+            raise Invalid('Choose a bounded retention batch between 1 and 1000')
+        try:
+            with delivery_lock(self.path, timeout=0):
+                with self.transaction() as db:
+                    now = int(self.clock())
+                    policies = db.execute("SELECT name,value FROM metadata WHERE name LIKE 'retention:%'").fetchall()
+                    eligible = []
+                    for policy in policies:
+                        owner = policy['name'].split(':', 1)[1]
+                        if not re.fullmatch(r'[0-9a-f]{64}', owner) or not db.execute('SELECT 1 FROM owners WHERE id=?', (owner,)).fetchone():
+                            raise Invalid('Invalid retention owner binding')
+                        days = validate_retention_record(self.open(policy['name'], policy['value']))['retention_days']
+                        if days is None:
+                            continue
+                        cutoff = now - days * 86400
+                        episodes = db.execute(
+                            "SELECT id FROM episodes WHERE owner=? AND state IN ('recovered','cancelled') ORDER BY rowid",
+                            (owner,))
+                        for episode in episodes:
+                            eid = episode['id']
+                            closure_identity = 'closure:' + eid
+                            closure = db.execute('SELECT value FROM metadata WHERE name=?', (closure_identity,)).fetchone()
+                            if closure is None:
+                                # Legacy closed events have no trustworthy closure timestamp.
+                                continue
+                            closed_at = validate_closure_record(self.open(closure_identity, closure['value']))['closed_at']
+                            if closed_at > cutoff:
+                                continue
+                            unresolved = db.execute(
+                                "SELECT 1 FROM jobs WHERE episode=? AND status IN ('queued','sending','uncertain') LIMIT 1",
+                                (eid,)).fetchone()
+                            if unresolved:
+                                continue
+                            eligible.append(eid)
+                            if len(eligible) >= limit:
+                                break
+                        if len(eligible) >= limit:
+                            break
+                    for eid in eligible:
+                        job_ids = [row['id'] for row in db.execute('SELECT id FROM jobs WHERE episode=?', (eid,)).fetchall()]
+                        db.execute('DELETE FROM metadata WHERE name=?', ('closure:' + eid,))
+                        db.execute('DELETE FROM metadata WHERE name=?', ('checkin:' + eid,))
+                        db.execute('DELETE FROM metadata WHERE name LIKE ?', ('update:' + eid + ':%',))
+                        for jid in job_ids:
+                            db.execute('DELETE FROM metadata WHERE name LIKE ?', ('resolution:' + jid + ':%',))
+                        db.execute('DELETE FROM declines WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM tasks WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM recipients WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM jobs WHERE episode=?', (eid,))
+                        db.execute('DELETE FROM episodes WHERE id=?', (eid,))
+                    return len(eligible)
+        except DeliveryBusy as error:
+            raise Conflict('Delivery or reconciliation is active; retry retention later') from error
+
     def delete_owner_data(self, owner_token):
         """Remove all live episode data for this owner without removing their access."""
         try:
@@ -443,6 +543,7 @@ class Store(RecordCodec):
                         'SELECT j.id FROM jobs j JOIN episodes e ON e.id=j.episode WHERE e.owner=?',
                         (owner,)).fetchall()]
                     for eid in episodes:
+                        db.execute('DELETE FROM metadata WHERE name=?', ('closure:' + eid,))
                         db.execute('DELETE FROM metadata WHERE name=?', ('checkin:' + eid,))
                         db.execute('DELETE FROM metadata WHERE name LIKE ?', ('update:' + eid + ':%',))
                     for jid in job_ids:
@@ -573,6 +674,10 @@ class Store(RecordCodec):
                         self._job(db, eid, {**recipient, 'message': recovery_message}, 'recovery', int(self.clock()))
             db.execute("UPDATE jobs SET status='cancelled' WHERE episode=? AND kind IN ('illness','update') AND status='queued'", (eid,))
             db.execute("UPDATE tasks SET state='closed' WHERE episode=? AND state!='completed'", (eid,))
+            closure_identity = 'closure:' + eid
+            closure_record = {'version': 1, 'closed_at': max(int(self.clock()), row['created'])}
+            db.execute('INSERT INTO metadata VALUES (?,?)',
+                       (closure_identity, self.seal(closure_identity, closure_record)))
             db.execute('UPDATE episodes SET state=? WHERE id=?', (state, eid))
 
     def quarantine_expired(self):

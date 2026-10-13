@@ -177,6 +177,7 @@ All fixtures and provider results are synthetic. See [current platform
 results](../deploy/README.md#local-and-linux-verification) for counts and skips.
 
 Not yet verified: real-host disk-full/power-loss behavior, large-data performance,
-off-host transfer, scheduled freshness/retention monitoring, operator/key recovery,
-restoration of a real production archive, or safe promotion back to live use.
+off-host transfer and expiry, scheduled backup freshness monitoring, the new
+owner-configurable live-history retention timer on the target host, operator/key
+recovery, restoration of a real production archive, or safe promotion back to live use.
 These remain release gates, alongside the wider product requirements.

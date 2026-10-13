@@ -35,6 +35,79 @@ paths:
         '405': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/RateLimited'}
         '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/owner/retention:
+    get:
+      operationId: readOwnerRetentionPolicy
+      summary: Read this owner's optional server-history retention period
+      description: An absent policy is disabled and returns retention_days null.
+      security: [{ownerCapability: []}]
+      responses:
+        '200':
+          description: Current per-owner policy
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [retention_days]
+                    properties:
+                      retention_days: {type: [integer, 'null'], minimum: 1, maximum: 3650}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/owner/retention-setting:
+    post:
+      operationId: setOwnerRetentionPolicy
+      summary: Set or disable this owner's optional live-history retention period
+      description: |
+        Requires the exact configured Origin. null disables the policy; otherwise
+        choose an integer number of days from 1 to 3650. The daily operator timer
+        removes only closed episodes at or before the cutoff and skips queued,
+        sending and uncertain jobs. No automatic deletion occurs while the
+        policy is disabled or the host timer is not enabled.
+      security: [{ownerCapability: []}]
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [retention_days]
+              properties:
+                retention_days: {type: [integer, 'null'], minimum: 1, maximum: 3650}
+      responses:
+        '200':
+          description: Saved policy
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [retention_days]
+                    properties:
+                      retention_days: {type: [integer, 'null'], minimum: 1, maximum: 3650}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Temporary'}
   /api/v1/owner/export:
     get:
       operationId: exportOwnerEpisodeHistory

@@ -16,6 +16,8 @@ OWNER_ROUTES = {
     '/api/v1/owner/episode-closures': 'POST',
     '/api/v1/owner/episode-updates': 'POST',
     '/api/v1/owner/episode-checkins': 'POST',
+    '/api/v1/owner/retention': 'GET',
+    '/api/v1/owner/retention-setting': 'POST',
 }
 
 
@@ -49,6 +51,12 @@ class OwnerApp(RecipientApp):
             return super().api(path, method, token, value)
         if path.endswith('/episode'):
             result = self.store.latest_episode(token)
+        elif path.endswith('/retention'):
+            result = {'retention_days': self.store.retention_days(token)}
+        elif path.endswith('/retention-setting'):
+            if not isinstance(value, dict) or set(value) != {'retention_days'}:
+                raise RequestError(400)
+            result = {'retention_days': self.store.set_retention_days(token, value['retention_days'])}
         elif path.endswith('/export'):
             result = self.store.export_owner(token)
         elif path.endswith('/data-deletion'):
