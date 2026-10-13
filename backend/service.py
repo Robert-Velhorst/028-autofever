@@ -167,6 +167,28 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS due_jobs ON jobs(status,due);
 """
 
+# Legacy schema stays frozen for backup validation and explicit v3 migration.
+SCHEMA_V3 = SCHEMA.replace("kind IN ('illness','recovery')", "kind IN ('illness','recovery','update')").replace(
+    'receipt BLOB, UNIQUE(episode,recipient,kind)',
+    "receipt BLOB, batch TEXT NOT NULL DEFAULT '', UNIQUE(episode,recipient,kind,batch)")
+
+
+def validate_update(value):
+    if (not isinstance(value, dict) or set(value) != {'version', 'command', 'message', 'recipients', 'created_at'} or
+            type(value['version']) is not int or value['version'] != 1 or
+            type(value['created_at']) is not int or value['created_at'] < 0):
+        raise Invalid('Invalid update record')
+    text(value['command'], 128, identifier=True)
+    text(value['message'], 2000)
+    recipients = value['recipients']
+    if not isinstance(recipients, list) or not 1 <= len(recipients) <= 100:
+        raise Invalid('Choose update recipients')
+    for recipient in recipients:
+        text(recipient, 80, identifier=True)
+    if len(set(recipients)) != len(recipients):
+        raise Invalid('Duplicate update recipients')
+    return value
+
 
 class RecordCodec:
     """Record encryption shared by the live store and offline backup verifier."""
@@ -199,23 +221,23 @@ class Store(RecordCodec):
             version = db.execute('PRAGMA user_version').fetchone()[0]
             application = db.execute('PRAGMA application_id').fetchone()[0]
             tables = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
-            if (tables or version or application) and (application != 1095128625 or version not in (1, 2)):
+            if (tables or version or application) and (application != 1095128625 or version not in (1, 2, 3)):
                 raise Invalid('Not an Autofever service database')
-            if version in (1, 2) and {x[0] for x in tables} != {'metadata', 'owners', 'episodes', 'recipients', 'tasks', 'declines', 'jobs'}:
+            if version in (1, 2, 3) and {x[0] for x in tables} != {'metadata', 'owners', 'episodes', 'recipients', 'tasks', 'declines', 'jobs'}:
                 raise Invalid('Incomplete service database; restore rather than silently recreate tables')
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise Invalid('Unsupported database version')
-            for statement in SCHEMA.split(';'):
+            for statement in (SCHEMA_V3 if version in (0, 3) else SCHEMA).split(';'):
                 if statement.strip():
                     db.execute(statement)
             check = db.execute("SELECT value FROM metadata WHERE name='key-check'").fetchone()
             if check is None:
-                if version in (1, 2):
+                if version in (1, 2, 3):
                     raise Invalid('Missing database key check')
                 db.execute('INSERT INTO metadata VALUES (?,?)', ('key-check', self.seal('key-check', {'version': 1})))
             elif self.open('key-check', check[0]) != {'version': 1}:
                 raise Invalid('Invalid database key')
-            db.execute('PRAGMA user_version=' + str(max(1, version)))
+            db.execute('PRAGMA user_version=' + str(version or 3))
             db.execute('PRAGMA application_id=1095128625')
 
     @contextmanager
@@ -228,7 +250,7 @@ class Store(RecordCodec):
             db.execute('BEGIN IMMEDIATE')
             # Also reject unsupported versions on already-running Store objects.
             # Every reader/writer must honor access revocation, not just startup.
-            if db.execute('PRAGMA user_version').fetchone()[0] not in (0, 1, 2):
+            if db.execute('PRAGMA user_version').fetchone()[0] not in (0, 1, 2, 3):
                 raise Invalid('Unsupported database version')
             # Checked on every transaction, including startup and read routes.
             # Presence alone blocks use even if the marker is damaged. An old
@@ -302,12 +324,51 @@ class Store(RecordCodec):
                 db.execute('INSERT INTO tasks(episode,id,state,claimant) VALUES (?,?,?,NULL)', (eid, task['id'], 'pending'))
             return eid
 
-    def _job(self, db, eid, recipient, kind, now, **extra):
+    def _job(self, db, eid, recipient, kind, now, *, batch='', **extra):
         jid = str(uuid.uuid4())
         envelope = {**recipient, 'id': jid, 'recipient_id': recipient['id'], 'episode_id': eid, 'kind': kind,
                     'idempotency_key': jid, **extra}
-        db.execute('INSERT INTO jobs(id,episode,recipient,kind,payload,status,due) VALUES (?,?,?,?,?,?,?)',
-                   (jid, eid, recipient['id'], kind, self.seal(jid, envelope), 'queued', now))
+        columns = 'id,episode,recipient,kind,payload,status,due'
+        values = (jid, eid, recipient['id'], kind, self.seal(jid, envelope), 'queued', now)
+        if batch:
+            columns += ',batch'
+            values += (batch,)
+        db.execute('INSERT INTO jobs(' + columns + ') VALUES (' + ','.join('?' for _ in values) + ')', values)
+
+    def updates(self, db, eid):
+        return [validate_update(self.open(r['name'], r['value'])) for r in
+                db.execute('SELECT name,value FROM metadata WHERE name LIKE ? ORDER BY rowid', ('update:' + eid + ':%',))]
+
+    def update(self, owner_token, eid, command, message, recipients):
+        record = validate_update({'version': 1, 'command': command, 'message': message,
+                                  'recipients': recipients, 'created_at': int(self.clock())})
+        record['recipients'] = sorted(recipients)
+        recipients = record['recipients']  # Freeze the caller's mutable selection.
+        with self.transaction() as db:
+            row = self._episode(db, owner_token, eid)
+            identity = 'update:' + eid + ':' + command
+            prior = db.execute('SELECT value FROM metadata WHERE name=?', (identity,)).fetchone()
+            if prior:
+                previous = validate_update(self.open(identity, prior['value']))
+                if previous['message'] != message or previous['recipients'] != record['recipients']:
+                    raise Conflict('Update command reused with different content')
+                return
+            if db.execute('PRAGMA user_version').fetchone()[0] != 3:
+                raise Conflict('Operator must run the backed-up updates migration first')
+            if row['state'] != 'active':
+                raise Conflict('Episode is closed')
+            informed = {r[0] for r in db.execute("SELECT recipient FROM jobs WHERE episode=? AND kind='illness' AND status='accepted'", (eid,))}
+            if not set(recipients) <= informed:
+                raise Conflict('Update recipients must have an accepted initial notification')
+            if len(self.updates(db, eid)) >= 50:
+                raise Conflict('Episode update limit reached')
+            if db.execute("SELECT 1 FROM jobs WHERE episode=? AND kind='update' AND status IN ('queued','sending','uncertain')", (eid,)).fetchone():
+                raise Conflict('Finish or reconcile the previous update first')
+            value = self.open(eid, row['data'])
+            for recipient in value['recipients']:
+                if recipient['id'] in recipients:
+                    self._job(db, eid, {**recipient, 'message': message}, 'update', record['created_at'], batch=command, update_command=command)
+            db.execute('INSERT INTO metadata VALUES (?,?)', (identity, self.seal(identity, record)))
 
     def episode(self, owner_token, eid):
         with self.transaction() as db:
@@ -317,6 +378,7 @@ class Store(RecordCodec):
             tasks = db.execute('SELECT id,state,claimant FROM tasks WHERE episode=? ORDER BY rowid', (eid,)).fetchall()
             declines = db.execute('SELECT task,recipient FROM declines WHERE episode=?', (eid,)).fetchall()
             return {'id': eid, 'state': row['state'], 'notifications': [dict(x) for x in jobs],
+                    'updates': self.updates(db, eid),
                     'snapshot': self.open(eid, row['data']),
                     'recipients': [{'id': r['recipient'], 'acknowledged': bool(r['acknowledged'])} for r in recipients],
                     'tasks': [{**dict(t), 'declined_by': [d['recipient'] for d in declines if d['task'] == t['id']]} for t in tasks]}
@@ -356,7 +418,9 @@ class Store(RecordCodec):
                               **({'description': task['description']} if 'description' in task else {}),
                               'status': state['state'], 'claimed_by_you': state['claimant'] == row['recipient'],
                               'declined_by_you': bool(declined)})
-            return {'message': own['message'], 'acknowledged': bool(row['acknowledged']), 'tasks': tasks}
+            updates = [{'message': u['message'], 'created_at': u['created_at']} for u in self.updates(db, row['episode'])
+                       if row['recipient'] in u['recipients']]
+            return {'message': own['message'], 'acknowledged': bool(row['acknowledged']), 'tasks': tasks, 'updates': updates}
 
     def acknowledge(self, token):
         with self.transaction() as db:
@@ -410,7 +474,7 @@ class Store(RecordCodec):
                 for recipient in value['recipients']:
                     if recipient['id'] in informed:
                         self._job(db, eid, {**recipient, 'message': recovery_message}, 'recovery', int(self.clock()))
-            db.execute("UPDATE jobs SET status='cancelled' WHERE episode=? AND kind='illness' AND status='queued'", (eid,))
+            db.execute("UPDATE jobs SET status='cancelled' WHERE episode=? AND kind IN ('illness','update') AND status='queued'", (eid,))
             db.execute("UPDATE tasks SET state='closed' WHERE episode=? AND state!='completed'", (eid,))
             db.execute('UPDATE episodes SET state=? WHERE id=?', (state, eid))
 
@@ -534,7 +598,9 @@ class Store(RecordCodec):
                                            (row['episode'], row['recipient'])).fetchone()
                     if row['episode_state'] != 'active' or recipient is None or recipient['expires'] <= now:
                         raise Conflict('Cannot retry a closed episode or expired personal link')
-                elif row['episode_state'] != 'recovered':
+                elif row['kind'] == 'update' and row['episode_state'] != 'active':
+                    raise Conflict('Cannot retry an update after episode closure')
+                elif row['kind'] == 'recovery' and row['episode_state'] != 'recovered':
                     raise Conflict('Recovery episode state changed')
                 result = 'queued'
             answer = {'job_id': job_id, 'attempt': attempt, 'result': result, 'applied': apply, 'replayed': False}

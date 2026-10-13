@@ -65,6 +65,10 @@ the generator itself.
 
 Initialize a new empty database:
 
+New stores use version 3, including update-message support. Existing version 1/2
+stores are not automatically migrated by setup; use the explicit
+[backup-first updates migration](updates.md#database-version-3-and-explicit-existing-store-migration).
+
 ```sh
 python -m backend.provision init --database /var/lib/028-autofever/state.sqlite3 --key-file /etc/028-autofever/store-key
 ```

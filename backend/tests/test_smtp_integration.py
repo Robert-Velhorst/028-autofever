@@ -287,6 +287,23 @@ class SMTPIntegrationTests(unittest.TestCase):
             with self.assertRaises(Denied): store.recipient(token)
             self.assertEqual([j['status'] for j in store.episode(owner,eid)['notifications']],['accepted','accepted'])
 
+    def test_queued_update_crosses_real_local_tls_smtp_without_another_helper_link(self):
+        with self.server() as (server,sender), tempfile.TemporaryDirectory() as tmp:
+            store,owner,eid=self.store(tmp)
+            self.assertEqual(run_worker(store,sender),1)
+            store.update(owner,eid,'still-ill','Ik neem nog een dag rust.',['alice'])
+            self.assertEqual(run_worker(store,sender),1)
+            self.assertEqual(len(server.messages),2)
+            message=BytesParser(policy=policy.default).parsebytes(server.messages[1])
+            self.assertEqual(message['Subject'],'Update via Autofever')
+            self.assertEqual(message['To'],'alice@example.invalid')
+            self.assertIsNone(message['Cc']); self.assertIsNone(message['Bcc'])
+            self.assertIn('Ik neem nog een dag rust.',message.get_content())
+            self.assertNotIn('/help#',message.get_content())
+            self.assertEqual(store.episode(owner,eid)['notifications'][-1]['status'],'accepted')
+            store.update(owner,eid,'still-ill','Ik neem nog een dag rust.',['alice'])
+            self.assertEqual(run_worker(store,sender),0)
+
     def test_bad_account_stops_worker_before_consuming_other_jobs(self):
         with self.server() as (server,sender), tempfile.TemporaryDirectory() as tmp:
             store,owner,eid=self.store(tmp)

@@ -1,6 +1,7 @@
 'use strict';
 window.AutofeverBridge = (() => {
   let ctx, state = {}, revision = 0, current = null, error = '', working = false;
+  let composing = false, updateDraft = null;
   const labels = {queued:'In wachtrij · niet verstuurd',sending:'Wordt aangeboden · uitkomst nog onbekend',accepted:'Aangenomen door de bezorgdienst · bezorging niet bevestigd',failed:'Niet verstuurd · mislukt',uncertain:'Verzenduitkomst onzeker · controle nodig',cancelled:'Geannuleerd · niet verstuurd'};
   const button = (label, action, cls='secondary') => '<button type="button" class="'+cls+'" data-owner-action="'+action+'">'+label+'</button>';
   const escape = value => ctx.esc(value);
@@ -17,21 +18,22 @@ window.AutofeverBridge = (() => {
       credentials:'omit', cache:'no-store', redirect:'error', signal:AbortSignal.timeout(15000),
       ...(payload === undefined ? {} : {body:JSON.stringify(payload)})
     });
-    if (!response.ok) throw Object.assign(new Error('Server request failed'), {status:response.status});
+    if (!response.ok) throw Object.assign(new Error('Server request failed'), {status:response.status,path});
     return (await response.json()).data;
   }
   function failure(exc) {
     if (exc.code === 'STALE') return 'De koppeling of het profiel is in een andere tab gewijzigd. Herlaad voordat je verdergaat.';
+    if (exc.path === 'episode-updates' && [400,413].includes(exc.status)) return 'Controleer je update: maximaal 2000 tekens en minstens één geldige ontvanger.';
     if (exc.status === 400) return 'Het opgeslagen profiel wordt nog niet ondersteund. Controleer ontvangers en gebruik per persoon één e-mail-, SMS- of WhatsApp-kanaal. Telefoonnummers beginnen met +landcode.';
     if (exc.status === 413) return 'Dit profiel is te groot voor de server. Verklein het voordat je opnieuw start.';
     if (exc.status === 404) return 'De toegang is niet beschikbaar. Controleer de privésleutel en de server; de lokale profielen zijn behouden.';
-    if (exc.status === 409) return 'Er is al een actieve melding, of een verzending is nog bezig of onzeker. Haal de actuele stand op.';
+    if (exc.status === 409) return 'Deze actie kan nu niet. Controleer de actuele stand, eerdere verzendingen en gekozen ontvangers. Bij een oude database moet de beheerder eerst de update-migratie uitvoeren.';
     return exc.userMessage || 'De serveruitkomst is niet bevestigd. Controleer de uitkomst voordat je opnieuw iets start. Je profielen blijven bewaard.';
   }
   async function run(operation) {
     if (working) return;
     working = true;
-    document.querySelectorAll('[data-owner-action],.activate').forEach(b => b.disabled = true);
+    document.querySelectorAll('[data-owner-action],.activate,#owner-update input,#owner-update textarea,#owner-update button').forEach(b => b.disabled = true);
     try { error = ''; await operation(); }
     catch (exc) { error = failure(exc); }
     finally { working = false; ctx.render(); ctx.focusHeading(); if(error) ctx.say(error,true); }
@@ -41,7 +43,8 @@ window.AutofeverBridge = (() => {
     if (!pending) return;
     try {
       current = await api(pending.path, pending.body);
-      await save({...state,pending:null});
+      await save({...state,pending:null,...(pending.path === 'episode-updates' ? {updateDraft:null} : {})});
+      if(pending.path === 'episode-updates') {composing = false; updateDraft = null;}
       ctx.say('Serverstand bijgewerkt. Een wachtrijstatus is geen bewijs van bezorging.');
     } catch (exc) {
       // These responses precede mutation; unknown/network outcomes retain the same command.
@@ -53,6 +56,14 @@ window.AutofeverBridge = (() => {
     current = await api('episode');
     if (state.pending?.path === 'episode-closures' && current?.id === state.pending.body.episode_id && current.state === state.pending.body.state) {
       await save({...state,pending:null});
+    }
+    if (state.pending?.path === 'episode-updates' && current?.id === state.pending.body.episode_id) {
+      const submitted = state.pending.body;
+      if(current.updates?.some(u => u.command === submitted.command && u.message === submitted.message &&
+          JSON.stringify([...u.recipients].sort()) === JSON.stringify([...submitted.recipients].sort()))) {
+        await save({...state,pending:null,updateDraft:null});
+        composing = false; updateDraft = null;
+      }
     }
   }
   function preparationCheck(profile, contacts) {
@@ -72,6 +83,20 @@ window.AutofeverBridge = (() => {
       if (name === 'refresh') return refresh();
       if (name === 'resolve') return submitPending();
       if (state.pending) throw {userMessage:'Controleer eerst de uitkomst van je eerdere actie.'};
+      if(name === 'compose') {
+        if(current?.state !== 'active') throw {userMessage:'Haal eerst de actieve melding op.'};
+        composing = true;
+        updateDraft = updateDraft?.episode_id === current.id ? updateDraft :
+          state.updateDraft?.episode_id === current.id ? structuredClone(state.updateDraft) :
+          {episode_id:current.id,message:'',recipients:[]};
+        return;
+      }
+      if(name === 'save-update-draft') {
+        await save({...state,updateDraft});
+        ctx.say('Updateconcept versleuteld op dit apparaat bewaard. Niets verstuurd.');
+        return;
+      }
+      if(name === 'hide-update') {composing = false; return;}
       if (name === 'activate') {
         const saved = await ctx.request(ctx.db.transaction('vault').objectStore('vault').get('data'));
         if ((saved?.revision || 0) !== ctx.getRevision()) throw {code:'STALE'};
@@ -99,10 +124,23 @@ window.AutofeverBridge = (() => {
       const snap = current.snapshot, prepared = snap.preparation;
       const person = id => prepared?.contacts.find(c => c.id === id)?.name || id;
       html += '<h2>'+escape(prepared?.profile.name || 'Ziekmelding')+'</h2><p class="intro">'+({active:'Actief op de server.',recovered:'Herstel vastgelegd op de server.',cancelled:'Geannuleerd op de server.'}[current.state])+'</p>';
+      if(composing && current.state === 'active' && !state.pending) {
+        const eligible = snap.recipients.filter(r => current.notifications.some(j => j.recipient === r.id && j.kind === 'illness' && j.status === 'accepted'));
+        html += '<section class="editor-block"><h2>Een kleine update</h2><p class="hint">Kies zelf wie deze tekst krijgt. Alleen ontvangers met een aangenomen oorspronkelijke ziekmelding kunnen worden geselecteerd. Aangenomen betekent niet bezorgd of gelezen.</p>';
+        html += '<form id="owner-update"><label for="owner-update-message">Updatebericht</label><textarea id="owner-update-message" name="message" maxlength="2000" required>'+escape(updateDraft.message)+'</textarea><fieldset><legend>Ontvangers van deze update</legend>';
+        for(const r of eligible) html += '<label class="check"><input type="checkbox" name="recipient" value="'+escape(r.id)+'"'+(updateDraft.recipients.includes(r.id)?' checked':'')+'><span>'+escape(person(r.id))+'</span></label>';
+        if(!eligible.length) html += '<p>Nog niemand selecteerbaar: de oorspronkelijke berichten zijn nog niet aangenomen.</p>';
+        html += '</fieldset><p class="hint">Concept bewaren slaat je tekst alleen versleuteld op dit apparaat op. Verzenden plaatst één bericht per gekozen persoon in de serverwachtrij. Maximaal 50 updates per ziekmelding; rond de vorige update eerst af.</p><div class="actions"><button class="primary" type="submit"'+(!eligible.length?' disabled':'')+'>Update in wachtrij zetten</button>'+button('Concept bewaren','save-update-draft')+button('Editor sluiten','hide-update','text-button')+'</div></form></section>';
+      }
+      if(current.updates?.length) {
+        html += '<h2 class="section-gap">Jouw updates</h2>';
+        for(const u of current.updates) html += '<section class="editor-block"><p class="long">'+escape(u.message)+'</p><p class="hint">Voor: '+escape(u.recipients.map(person).join(', '))+' · '+escape(new Date(u.created_at*1000).toLocaleString('nl-NL'))+'</p></section>';
+      }
       html += '<p class="hint">Status bij de laatste controle. Aangenomen door een bezorgdienst betekent niet bezorgd of gelezen.</p><h2 class="section-gap">Berichten</h2>';
       for (const recipient of snap.recipients) {
         html += '<section class="editor-block"><h3>'+escape(person(recipient.id))+'</h3><p class="long">'+escape(recipient.message)+'</p>';
-        for(const job of current.notifications.filter(j => j.recipient === recipient.id)) html += '<p class="hint">'+(job.kind === 'recovery'?'Herstel':'Ziekmelding')+' · '+escape(labels[job.status] || 'Onbekende status')+'</p>';
+        let updateNumber = 0;
+        for(const job of current.notifications.filter(j => j.recipient === recipient.id)) html += '<p class="hint">'+(job.kind === 'recovery'?'Herstel':job.kind === 'update'?'Update '+(++updateNumber):'Ziekmelding')+' · '+escape(labels[job.status] || 'Onbekende status')+'</p>';
         html += '<p class="hint">'+(current.recipients.find(r => r.id===recipient.id)?.acknowledged?'Lezen expliciet bevestigd':'Lezen niet bevestigd')+'</p></section>';
       }
       html += '<h2 class="section-gap">Hulp</h2>';
@@ -118,7 +156,7 @@ window.AutofeverBridge = (() => {
         html += '</section>';
       }
       if (prepared) html += '<p class="hint">Check-in: elke '+escape(prepared.profile.checkin)+' uur · bewaard, nog niet ingepland.</p>'+(prepared.profile.duration?'<p class="hint">Verwachte terugkeer: '+escape(prepared.profile.duration)+'</p>':'');
-      if (!state.pending) html += '<div class="actions">'+(current.state==='active'?button('Ik ben hersteld','recover','primary')+button('Gebeurtenis annuleren','cancel','text-button'):button('Nieuwe ziekmelding','activate','primary'))+'</div>';
+      if (!state.pending) html += '<div class="actions">'+(current.state==='active'?button('Update schrijven','compose','primary')+button('Ik ben hersteld','recover')+button('Gebeurtenis annuleren','cancel','text-button'):button('Nieuwe ziekmelding','activate','primary'))+'</div>';
     }
     html += '<div class="actions">'+button('Serverstand ophalen','refresh')+'</div>';
     document.getElementById('main').innerHTML = html;
@@ -142,7 +180,27 @@ window.AutofeverBridge = (() => {
     const control = event.target.closest('[data-owner-action]');
     if(control && ctx) {event.preventDefault(); action(control.dataset.ownerAction);}
   });
+  const captureUpdate = event => {
+    if(event.target.closest('#owner-update') && current) {
+      const fields = new FormData(document.getElementById('owner-update'));
+      updateDraft = {episode_id:current.id,message:String(fields.get('message')||''),recipients:fields.getAll('recipient')};
+    }
+  };
+  document.addEventListener('input',captureUpdate);
+  document.addEventListener('change',captureUpdate);
   document.addEventListener('submit', event => {
+    if(event.target.id === 'owner-update' && ctx) {
+      event.preventDefault(); event.stopImmediatePropagation();
+      captureUpdate({target:event.target});
+      run(async () => {
+        if(state.pending || current?.state !== 'active') throw {userMessage:'Controleer eerst je lopende actie en melding.'};
+        const draft = structuredClone(updateDraft);
+        if(!draft.message.trim() || !draft.recipients.length) throw {userMessage:'Schrijf een update en selecteer minstens één ontvanger.'};
+        await save({...state,updateDraft:draft,pending:{path:'episode-updates',body:{episode_id:current.id,command:crypto.randomUUID(),message:draft.message.trim(),recipients:draft.recipients}}});
+        await submitPending();
+      });
+      return;
+    }
     if(event.target.id !== 'owner-connect' || !ctx) return;
     event.preventDefault(); event.stopImmediatePropagation();
     run(async () => {

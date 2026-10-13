@@ -136,9 +136,11 @@ checks, unknown metadata and failed record authentication. It verifies episode
 snapshot shape and encrypted job identities too. It is not a full semantic
 business-state proof, protection from a key-holding attacker, or provider-history
 reconciliation. The table schema comparison is intentionally strict: future
-schema changes need explicit backup/restore support. Database versions 1 and 2
+schema changes need explicit backup/restore support. Database versions 1, 2 and 3
 are accepted; version 2 adds encrypted owner-access records without changing
-tables. Their structure and owner binding are checked, and restore preserves
+tables, and version 3 adds update batches to the jobs table. Update metadata is
+checked against episode recipients, jobs and encrypted envelopes. Access-record
+structure and owner binding are checked, and restore preserves
 both the version floor and disabled credentials under quarantine. See
 [owner access compatibility](owner-access.md#before-use-forward-only-database-compatibility).
 

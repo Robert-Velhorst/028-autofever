@@ -91,7 +91,7 @@ def rotate(store, credential_file, output, *, resume=False):
         if (access_row(store, db, token_hash(new['capability'])) is not None or
                 db.execute('SELECT 1 FROM owners WHERE id=?', (token_hash(new['capability']),)).fetchone()):
             raise Conflict('Replacement capability already registered')
-        db.execute('PRAGMA user_version=2')
+        db.execute('PRAGMA user_version=' + str(max(2, db.execute('PRAGMA user_version').fetchone()[0])))
         write_access(store, db, old, owner, False)
         write_access(store, db, new, owner, True)
     return {'replayed': False}
@@ -103,7 +103,7 @@ def revoke(store, credential_file):
         owner, row = check_record(store, db, record, allow_revoked=True)
         if row is not None and not row['enabled']:
             return {'replayed': True}
-        db.execute('PRAGMA user_version=2')
+        db.execute('PRAGMA user_version=' + str(max(2, db.execute('PRAGMA user_version').fetchone()[0])))
         write_access(store, db, record, owner, False)
     return {'replayed': False}
 

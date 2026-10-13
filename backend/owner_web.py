@@ -12,6 +12,7 @@ OWNER_ROUTES = {
     '/api/v1/owner/episode': 'GET',
     '/api/v1/owner/episodes': 'POST',
     '/api/v1/owner/episode-closures': 'POST',
+    '/api/v1/owner/episode-updates': 'POST',
 }
 
 
@@ -36,6 +37,8 @@ class OwnerApp(RecipientApp):
         return self.owner_csp if path == '/owner' else super().policy(path)
 
     def body_limit(self, path):
+        if path == '/api/v1/owner/episode-updates':
+            return 32768
         return 2 * 1024 * 1024 if path == '/api/v1/owner/episodes' else super().body_limit(path)
 
     def api(self, path, method, token, value):
@@ -48,6 +51,12 @@ class OwnerApp(RecipientApp):
                 raise RequestError(400)
             eid = self.store.activate_profile(token, value['command'], value['profile'], value['contacts'], link_ttl=value['link_ttl'])
             result = self.store.episode(token, eid)
+        elif path.endswith('/episode-updates'):
+            if (not isinstance(value, dict) or set(value) != {'episode_id', 'command', 'message', 'recipients'} or
+                    not isinstance(value['episode_id'], str)):
+                raise RequestError(400)
+            self.store.update(token, value['episode_id'], value['command'], value['message'], value['recipients'])
+            result = self.store.episode(token, value['episode_id'])
         else:
             if not isinstance(value, dict) or set(value) != {'episode_id', 'state', 'recovery_message'}:
                 raise RequestError(400)

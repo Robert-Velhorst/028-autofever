@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from backend.dispatch_lock import delivery_lock
 from backend.hosted import read_secret
-from backend.service import Invalid, RecordCodec, SCHEMA, snapshot, validate_access
+from backend.service import Invalid, RecordCodec, SCHEMA, SCHEMA_V3, snapshot, validate_access, validate_update
 
 
 MAGIC = b'AUTOFEVER-BACKUP\x01'
@@ -57,7 +57,7 @@ def schema_rows(db):
 
 def check_identity(db, codec):
     if (db.execute('PRAGMA application_id').fetchone()[0] != 1095128625 or
-            db.execute('PRAGMA user_version').fetchone()[0] not in (1, 2)):
+            db.execute('PRAGMA user_version').fetchone()[0] not in (1, 2, 3)):
         raise Invalid('Unsupported service database')
     check = db.execute("SELECT value FROM metadata WHERE name='key-check'").fetchone()
     if check is None or codec.open('key-check', check[0]) != {'version': 1}:
@@ -81,7 +81,7 @@ def validate_database(path, key):
     with closing(readonly(path)) as db, closing(sqlite3.connect(':memory:')) as expected:
         db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
         check_identity(db, codec)
-        expected.executescript(SCHEMA)
+        expected.executescript(SCHEMA_V3 if db.execute('PRAGMA user_version').fetchone()[0] == 3 else SCHEMA)
         if schema_rows(db) != schema_rows(expected):
             raise Invalid('Unexpected schema, missing index, trigger or view')
         if db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
@@ -112,9 +112,20 @@ def validate_database(path, key):
                     raise Invalid('Invalid reconciliation record')
             elif re.fullmatch(r'owner-access:[0-9a-f]{64}', name):
                 validate_access(value)
-                if (db.execute('PRAGMA user_version').fetchone()[0] != 2 or
+                if (db.execute('PRAGMA user_version').fetchone()[0] not in (2, 3) or
                         not db.execute('SELECT 1 FROM owners WHERE id=?', (value['owner_hash'],)).fetchone()):
                     raise Invalid('Invalid owner access binding or database version')
+            elif re.fullmatch(r'update:[0-9a-f-]{36}:[A-Za-z0-9_-]{1,128}', name):
+                validate_update(value)
+                _, eid, command = name.split(':')
+                if db.execute('PRAGMA user_version').fetchone()[0] != 3 or command != value['command']:
+                    raise Invalid('Invalid update identity/version')
+                episode = db.execute('SELECT data FROM episodes WHERE id=?', (eid,)).fetchone()
+                if episode is None or not set(value['recipients']) <= {r['id'] for r in codec.open(eid, episode[0])['recipients']}:
+                    raise Invalid('Invalid update recipient binding')
+                jobs = db.execute("SELECT recipient FROM jobs WHERE episode=? AND kind='update' AND batch=?", (eid, command)).fetchall()
+                if {r[0] for r in jobs} != set(value['recipients']):
+                    raise Invalid('Incomplete update jobs')
             elif re.fullmatch(r'provision:[0-9a-f-]{36}', name):
                 if (not isinstance(value, dict) or set(value) !=
                         {'version', 'owner_hash', 'credential_digest', 'created_at'} or
@@ -138,6 +149,15 @@ def validate_database(path, key):
                     value.get('idempotency_key') != identity or value.get('episode_id') != episode or
                     value.get('recipient_id') != recipient or value.get('kind') != kind):
                 raise Invalid('Job envelope identity mismatch')
+            if kind == 'update':
+                batch = db.execute('SELECT batch FROM jobs WHERE id=?', (identity,)).fetchone()[0]
+                update_id = 'update:' + episode + ':' + batch
+                update = db.execute('SELECT value FROM metadata WHERE name=?', (update_id,)).fetchone()
+                if update is None or value.get('update_command') != batch or 'action_token' in value:
+                    raise Invalid('Invalid update envelope binding')
+                update = validate_update(codec.open(update_id, update[0]))
+                if recipient not in update['recipients'] or value.get('message') != update['message']:
+                    raise Invalid('Update envelope content mismatch')
             if receipt is not None:
                 value = codec.open(identity + ':receipt', receipt)
                 if not isinstance(value, str) or not 1 <= len(value) <= 1000:

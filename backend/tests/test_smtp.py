@@ -93,6 +93,20 @@ class SMTPTests(unittest.TestCase):
         self.assertNotIn('/help#', message.get_content())
         self.assertEqual(message['Subject'], 'Herstelbericht via Autofever')
 
+    def test_update_subject_plain_text_private_recipient_and_no_capability(self):
+        smtp = FakeSMTP()
+        item = envelope(kind='update',message='Nog een dag rust. <b>Geen HTML</b>')
+        item.pop('action_token')
+        self.send(smtp,item)
+        message = BytesParser(policy=policy.default).parsebytes(smtp.bytes[:-3])
+        self.assertEqual(message['Subject'],'Update via Autofever')
+        self.assertEqual(message['To'],'alice@example.invalid')
+        self.assertIsNone(message['Cc']); self.assertIsNone(message['Bcc'])
+        self.assertEqual(message.get_content_type(),'text/plain')
+        self.assertIn('<b>Geen HTML</b>',message.get_content())
+        self.assertNotIn('/help#',message.get_content())
+        with self.assertRaises(SendFailure): self.send(FakeSMTP(),envelope(kind='update'))
+
     def test_invalid_or_unapproved_envelope_never_connects(self):
         for changes in [dict(destination='bob@example.invalid'), dict(channel='sms'),
                         dict(destination='alice@example.invalid\r\nBcc: stolen@example.invalid'),

@@ -4,7 +4,7 @@
   history.replaceState(null, '', location.pathname); // Do not retain capability in page history.
   const byId = id => document.getElementById(id);
   const content = byId('content'), notice = byId('notice'), refresh = byId('refresh');
-  let busy = false;
+  let busy = false, linkGeneration = 0;
 
   function lock(value) {
     busy = value;
@@ -18,6 +18,7 @@
     content.hidden = true;
     byId('message').textContent = '';
     byId('tasks').replaceChildren();
+    byId('updates').replaceChildren();
   }
 
   function unavailable() {
@@ -52,6 +53,15 @@
     ack.textContent = data.acknowledged ? 'Lezen bevestigd' : 'Ik heb dit gelezen';
     ack.dataset.finished = String(data.acknowledged);
     byId('tasks').replaceChildren();
+    byId('updates').replaceChildren();
+    if(data.updates?.length) {
+      byId('updates').append(node('h2','Updates voor jou'));
+      for(const update of data.updates) {
+        const article = node('article','','task');
+        article.append(node('p',update.message),node('p',new Date(update.created_at*1000).toLocaleString('nl-NL')));
+        byId('updates').append(article);
+      }
+    }
     for (const task of data.tasks) {
       const article = node('article', '', 'task');
       article.append(node('h3', task.title), node('p', task.timing));
@@ -84,12 +94,16 @@
 
   async function update(path = '', body) {
     if (busy || !token) return;
+    const generation = linkGeneration;
     lock(true);
     notice.textContent = body === undefined ? 'Gegevens worden opgehaald…' : 'Je reactie wordt opgeslagen…';
     try {
-      render(await request(path, body));
+      const data = await request(path, body);
+      if(generation !== linkGeneration) return;
+      render(data);
       notice.textContent = body === undefined ? '' : 'Je reactie is opgeslagen.';
     } catch (error) {
+      if(generation !== linkGeneration) return;
       if (error.status === 404) unavailable();
       else {
         clear(); // Never leave stale controls usable after an unknown outcome.
@@ -100,8 +114,10 @@
           : 'De actuele stand kon niet worden opgehaald. Je reactie is mogelijk al opgeslagen. Haal de gegevens opnieuw op voordat je verdergaat.';
       }
     } finally {
-      lock(false);
-      if (body !== undefined) notice.focus();
+      if(generation === linkGeneration) {
+        lock(false);
+        if (body !== undefined) notice.focus();
+      }
     }
   }
 
@@ -109,6 +125,15 @@
   refresh.addEventListener('click', () => update());
   window.addEventListener('pagehide', clear);
   window.addEventListener('pageshow', event => { if (event.persisted) update(); });
+  window.addEventListener('hashchange', () => {
+    linkGeneration++;
+    token = location.hash.slice(1);
+    history.replaceState(null, '', location.pathname);
+    busy = false;
+    clear(); // Never show the previous person's data while switching links.
+    if(/^[A-Za-z0-9_-]{43}$/.test(token)) update();
+    else unavailable();
+  });
   if (/^[A-Za-z0-9_-]{43}$/.test(token)) update();
   else unavailable();
 })();

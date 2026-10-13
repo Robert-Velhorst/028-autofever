@@ -95,7 +95,7 @@ class SMTPSender:
             raise Invalid('TLS 1.2+, trusted certificates and hostname verification are required')
 
     def compose(self, envelope):
-        if envelope.get('channel') != 'email' or envelope.get('kind') not in ('illness', 'recovery'):
+        if envelope.get('channel') != 'email' or envelope.get('kind') not in ('illness', 'recovery', 'update'):
             raise Invalid('Unsupported message kind/channel')
         destination = mailbox(envelope.get('destination'))
         if destination not in self.config.allowed_recipients:
@@ -114,12 +114,13 @@ class SMTPSender:
             text += '\n\nLees je persoonlijke bericht en reageer op hulpvragen:\n' + self.config.help_origin + '/help#' + token
             text += '\n\nDeze persoonlijke link geeft toegang tot jouw bericht. Deel hem niet. Je hebt geen account nodig.'
         elif 'action_token' in envelope:
-            raise Invalid('Recovery must not include a recipient capability')
+            raise Invalid('Follow-up must not include a recipient capability')
         text += '\n\nVerstuurd via Autofever volgens de ingestelde melding. Dit is geen medische noodhulpdienst.\n'
         message = EmailMessage(policy=SMTP_POLICY)
         message['From'] = 'Autofever <' + self.config.from_address + '>'
         message['To'] = destination
-        message['Subject'] = 'Herstelbericht via Autofever' if envelope['kind'] == 'recovery' else 'Bericht via Autofever'
+        message['Subject'] = {'illness': 'Bericht via Autofever', 'recovery': 'Herstelbericht via Autofever',
+                              'update': 'Update via Autofever'}[envelope['kind']]
         message['Date'] = formatdate(usegmt=True)
         message_id = '<' + job + '@' + self.config.from_address.rsplit('@', 1)[1] + '>'
         message['Message-ID'] = message_id

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Autofever lifecycle API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Local development or explicit hosted HTTPS-proxy boundary. Not deployed or connected to a provider.
     Every request requires the exact configured Host. POST additionally requires
@@ -9,7 +9,7 @@ info:
     are rejected. No cookies, CORS or public provisioning. Owner routes require
     the opt-in local owner app or HostedApp; recipient-only mode returns 404 for those routes.
     Duplicate JSON keys and unknown body fields are rejected; body limit 8192 bytes
-    except owner profile activation (2 MiB).
+    except owner profile activation (2 MiB) and episode updates (32768 bytes).
     Successful POST responses contain a fresh view; repeat acknowledgment and
     repeating one's own accepted/completed action are safe. Concurrent episode
     closure may yield 404 even when an earlier mutation committed: re-read, do not
@@ -58,6 +58,48 @@ paths:
                   maxItems: 100
                   items: {$ref: '#/components/schemas/SavedContact'}
                 link_ttl: {type: integer, minimum: 60, maximum: 604800}
+      responses:
+        '200': {$ref: '#/components/responses/OwnerView'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Unavailable'}
+        '405': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/RateLimited'}
+        '503': {$ref: '#/components/responses/Temporary'}
+  /api/v1/owner/episode-updates:
+    post:
+      operationId: createOwnerEpisodeUpdate
+      summary: Idempotently queue an update for explicitly selected informed recipients
+      description: |
+        Requires a v3 database and an active episode for a new command. Only recipients
+        whose initial notification is accepted may be selected. At most 50 updates per
+        episode; another update is blocked while a previous update is queued, sending
+        or uncertain. Same command/content replays without new jobs, including after
+        closure. Changed content is 409. Selection order does not change identity.
+        A successful response means queued, not sent/delivered/read. No renewed helper links.
+      security: [{ownerCapability: []}]
+      parameters: [{$ref: '#/components/parameters/Origin'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [episode_id, command, message, recipients]
+              properties:
+                episode_id: {type: string}
+                command: {type: string, pattern: '^[A-Za-z0-9_-]{1,128}$'}
+                message: {type: string, minLength: 1, maxLength: 2000}
+                recipients:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items: {$ref: '#/components/schemas/Identifier'}
       responses:
         '200': {$ref: '#/components/responses/OwnerView'}
         '400': {$ref: '#/components/responses/Error'}
@@ -252,7 +294,7 @@ components:
             - {type: 'null'}
             - type: object
               additionalProperties: false
-              required: [id, state, snapshot, notifications, recipients, tasks]
+              required: [id, state, snapshot, notifications, recipients, tasks, updates]
               properties:
                 id: {type: string}
                 state: {type: string, enum: [active, recovered, cancelled]}
@@ -269,9 +311,22 @@ components:
                     properties:
                       id: {type: string}
                       recipient: {type: string}
-                      kind: {type: string, enum: [illness, recovery]}
+                      kind: {type: string, enum: [illness, recovery, update]}
                       status: {type: string, enum: [queued, sending, accepted, failed, uncertain, cancelled]}
                       attempts: {type: integer, minimum: 0}
+                updates:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [version, command, message, recipients, created_at]
+                    properties:
+                      version: {type: integer, const: 1}
+                      command: {type: string}
+                      message: {type: string, maxLength: 2000}
+                      recipients: {type: array, items: {type: string}}
+                      created_at: {type: integer}
                 recipients:
                   type: array
                   items:
@@ -300,10 +355,21 @@ components:
         data:
           type: object
           additionalProperties: false
-          required: [message, acknowledged, tasks]
+          required: [message, acknowledged, tasks, updates]
           properties:
             message: {type: string}
             acknowledged: {type: boolean}
+            updates:
+              type: array
+              maxItems: 50
+              description: Only updates explicitly addressed to this recipient. Does not imply email delivery or reading; acknowledgment covers only the original message.
+              items:
+                type: object
+                additionalProperties: false
+                required: [message, created_at]
+                properties:
+                  message: {type: string, maxLength: 2000}
+                  created_at: {type: integer}
             tasks:
               type: array
               maxItems: 100

@@ -25,9 +25,11 @@ already displayed on a lost device or revoke recipient links.
    store key is already privileged; these commands do not verify a person's
    real-world identity or provide an additional authentication factor.
 
-New and untouched databases remain at `PRAGMA user_version=1`. The first
-successful rotation or revocation advances the version to **2 in the same SQL
-transaction** as the access changes. Tables and episode owner IDs are unchanged;
+Older untouched databases remain at `PRAGMA user_version=1`. The first
+successful rotation or revocation advances that version to **2 in the same SQL
+transaction** as the access changes. New databases now start at version 3 for
+[update support](updates.md); access changes preserve that higher version.
+Tables and episode owner IDs are unchanged by access changes;
 encrypted `owner-access:<capability hash>` records map replacement credentials
 to a stable owner and retain disabled-code records. No episode/queue rewrite or
 data deletion is performed. Existing v1 credentials remain supported unless
@@ -38,7 +40,7 @@ flag. Older releases refuse that version at startup. Already-running old code
 cannot be made safe by a version marker alone, which is why stopping it first is
 mandatory. Never lower the version, remove access records or run an old release
 against this state. Fix forward with access-aware code; preserve revocation and
-send history. The upgraded backup verifier accepts v1/v2 and validates access
+send history. The upgraded backup verifier accepts v1/v2/v3 and validates access
 record structure and owner binding; older verifiers refuse these databases.
 
 ## Replace a code while retaining the account

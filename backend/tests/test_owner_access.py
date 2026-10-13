@@ -4,6 +4,7 @@ import contextlib
 import http.client
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -15,7 +16,7 @@ from unittest.mock import patch
 
 from backend import backup, owner_access, provision
 from backend.local import make_local_server
-from backend.service import Conflict, Denied, Invalid, RestoreHeld, Store, token_hash
+from backend.service import Conflict, Denied, Invalid, RestoreHeld, Store, RecordCodec, SCHEMA, token_hash
 from backend.tests.test_owner import saved_contacts, saved_profile
 
 
@@ -28,6 +29,14 @@ class OwnerAccessTests(unittest.TestCase):
         self.path = self.root / 'state.sqlite3'
         self.keyfile = self.root / 'store.afkey'
         backup.write_private(self.keyfile, self.key.hex().encode())
+        # Exercise access upgrades from the original v1 format even though new
+        # stores now start at v3 for update-message support.
+        with contextlib.closing(sqlite3.connect(self.path)) as db:
+            db.executescript(SCHEMA)
+            db.execute('PRAGMA application_id=1095128625')
+            db.execute('PRAGMA user_version=1')
+            db.execute('INSERT INTO metadata VALUES (?,?)', ('key-check', RecordCodec(self.key).seal('key-check', {'version':1})))
+            db.commit()
         self.store = Store(self.path, self.key)
         self.old, self.new = self.root / 'old.afowner', self.root / 'new.afowner'
         provision.provision_owner(self.store, self.old)
