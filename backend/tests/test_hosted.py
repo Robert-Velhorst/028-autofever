@@ -205,9 +205,16 @@ class HostedTests(unittest.TestCase):
             payload = json.dumps({'command':'socket', 'profile':saved_profile(), 'contacts':saved_contacts(), 'link_ttl':3600})
             self.assertEqual(call('/api/v1/owner/episodes', headers=write_headers, method='POST', body=payload)[0], 200)
             self.assertEqual(len(self.store.latest_episode(self.owner)['notifications']), 2)
-            # An early size rejection may reset TCP with unread oversized input;
-            # its error body is not an application API response. Assert the status.
-            self.assertEqual(call('/owner', headers={**headers,'X-Large':'a'*17000}, read_body=False)[0], 431)
+            # Windows may reset TCP while the client writes an oversized header,
+            # before http.client can read Waitress's 431 response.
+            try:
+                oversized_header_status = call(
+                    '/owner', headers={**headers, 'X-Large':'a'*17000}, read_body=False)[0]
+            except ConnectionResetError:
+                oversized_header_status = None
+            self.assertIn(oversized_header_status, (None, 431))
+            self.assertTrue(worker.is_alive())
+            self.assertEqual(thread_errors, [])
             # Reject an oversized declared body before transferring its content.
             self.assertEqual(call('/api/v1/owner/episodes', headers={**write_headers, 'Content-Length':str(2*1024*1024+1)},
                                   method='POST', body=b'')[0], 413)
