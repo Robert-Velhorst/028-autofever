@@ -1,0 +1,50 @@
+# Optional SMTP sender. Do not install or enable until the provider,
+# sender identity, approved recipient allowlist, public HTTPS help URL,
+# dedicated credentials and backup/rollback plan have been qualified.
+[Unit]
+Description=028-autofever opt-in SMTP queue worker
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=autofever
+Group=autofever
+WorkingDirectory=/opt/028-autofever/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=store-key:/etc/028-autofever/store-key
+LoadCredential=smtp-password:/etc/028-autofever/smtp-password
+LoadCredential=smtp-config:/etc/028-autofever/smtp.json
+ExecStart=/opt/028-autofever/current/backend/.venv/bin/python -m backend.worker --database /var/lib/028-autofever/state.sqlite3 --smtp-config ${CREDENTIALS_DIRECTORY}/smtp-config --store-key-file ${CREDENTIALS_DIRECTORY}/store-key --smtp-password-file ${CREDENTIALS_DIRECTORY}/smtp-password --send --continuous --poll-seconds 5
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/028-autofever
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=32
+LimitNOFILE=512
+
+[Install]
+WantedBy=multi-user.target

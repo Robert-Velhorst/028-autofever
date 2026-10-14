@@ -229,6 +229,7 @@ class SMTPIntegrationTests(unittest.TestCase):
             store,owner,eid=self.store(tmp)
             path=Path(tmp)/'smtp.json'
             path.write_text(json.dumps(configuration().__dict__),encoding='utf-8')
+            path.chmod(0o600)
             before=store.episode(owner,eid)
             with patch.dict('os.environ',{'AUTOFEVER_SMTP_PASSWORD':'private-test-password','AUTOFEVER_STORE_KEY_HEX':bytes(range(32)).hex()}), patch('backend.smtp.smtplib.SMTP_SSL') as connection, contextlib.redirect_stdout(io.StringIO()) as output:
                 result=main(['--database',str(store.path),'--smtp-config',str(path),'--check'])
@@ -257,6 +258,7 @@ class SMTPIntegrationTests(unittest.TestCase):
                 store,owner,eid = self.store(tmp)
                 path = Path(tmp) / 'smtp.json'
                 path.write_text(json.dumps(sender.config.__dict__), encoding='utf-8')
+                path.chmod(0o600)
                 output, errors = io.StringIO(), io.StringIO()
                 with patch.dict('os.environ', {'AUTOFEVER_SMTP_PASSWORD': password,
                                               'AUTOFEVER_STORE_KEY_HEX': bytes(range(32)).hex()}), \
@@ -271,6 +273,80 @@ class SMTPIntegrationTests(unittest.TestCase):
                 self.assertNotIn(bytes(range(32)).hex(), diagnostics)
                 self.assertNotIn('alice@example.invalid', diagnostics)
                 self.assertIn('not delivery confirmation' if expected_code == 0 else 'needs attention', diagnostics)
+
+    def test_send_cli_reads_systemd_credential_files_without_environment_secrets(self):
+        with self.server() as (server, sender), tempfile.TemporaryDirectory() as tmp:
+            store, owner, eid = self.store(tmp)
+            config_path = Path(tmp) / 'smtp.json'
+            key_path = Path(tmp) / 'store-key'
+            password_path = Path(tmp) / 'smtp-password'
+            config_path.write_text(json.dumps(sender.config.__dict__), encoding='utf-8')
+            key_path.write_text(bytes(range(32)).hex() + '\n', encoding='ascii')
+            password_path.write_text('private-test-password\n', encoding='ascii')
+            for path in (config_path, key_path, password_path):
+                path.chmod(0o600)
+            output, errors = io.StringIO(), io.StringIO()
+            with patch.dict('os.environ', {}, clear=True), \
+                    patch('backend.smtp.ssl.create_default_context', return_value=self.client_context), \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                result = main([
+                    '--database', str(store.path), '--smtp-config', str(config_path),
+                    '--store-key-file', str(key_path), '--smtp-password-file', str(password_path), '--send',
+                ])
+            self.assertEqual(result, 0)
+            self.assertEqual(store.episode(owner, eid)['notifications'][0]['status'], 'accepted')
+            self.assertEqual(len(server.messages), 1)
+            diagnostics = output.getvalue() + errors.getvalue()
+            self.assertNotIn('private-test-password', diagnostics)
+            self.assertNotIn(bytes(range(32)).hex(), diagnostics)
+
+    def test_worker_rejects_ambiguous_environment_and_file_credentials_without_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, owner, eid = self.store(tmp)
+            config_path = Path(tmp) / 'smtp.json'
+            key_path = Path(tmp) / 'store-key'
+            password_path = Path(tmp) / 'smtp-password'
+            config_path.write_text(json.dumps(configuration().__dict__), encoding='utf-8')
+            config_path.chmod(0o600)
+            key_path.write_text(bytes(range(32)).hex(), encoding='ascii')
+            password_path.write_text('private-test-password', encoding='ascii')
+            output, errors = io.StringIO(), io.StringIO()
+            with patch.dict('os.environ', {
+                    'AUTOFEVER_SMTP_PASSWORD': 'environment-secret',
+                    'AUTOFEVER_STORE_KEY_HEX': bytes(range(32)).hex(),
+            }, clear=True), patch('backend.smtp.smtplib.SMTP_SSL') as connection, \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                result = main([
+                    '--database', str(store.path), '--smtp-config', str(config_path),
+                    '--store-key-file', str(key_path), '--smtp-password-file', str(password_path), '--check',
+                ])
+            self.assertEqual(result, 2)
+            connection.assert_not_called()
+            self.assertEqual(store.episode(owner, eid)['notifications'][0]['status'], 'queued')
+            self.assertNotIn('environment-secret', output.getvalue() + errors.getvalue())
+
+    def test_credential_file_check_is_non_sending_and_leaves_the_queue_untouched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store, owner, eid = self.store(tmp)
+            config_path = Path(tmp) / 'smtp.json'
+            key_path = Path(tmp) / 'store-key'
+            password_path = Path(tmp) / 'smtp-password'
+            config_path.write_text(json.dumps(configuration().__dict__), encoding='utf-8')
+            key_path.write_text(bytes(range(32)).hex() + '\n', encoding='ascii')
+            password_path.write_text('private-test-password\n', encoding='ascii')
+            for path in (config_path, key_path, password_path):
+                path.chmod(0o600)
+            output, errors = io.StringIO(), io.StringIO()
+            with patch.dict('os.environ', {}, clear=True), patch('backend.smtp.smtplib.SMTP_SSL') as connection, \
+                    contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                result = main([
+                    '--database', str(store.path), '--smtp-config', str(config_path),
+                    '--store-key-file', str(key_path), '--smtp-password-file', str(password_path), '--check',
+                ])
+            self.assertEqual(result, 0)
+            connection.assert_not_called()
+            self.assertEqual(store.episode(owner, eid)['notifications'][0]['status'], 'queued')
+            self.assertNotIn('private-test-password', output.getvalue() + errors.getvalue())
 
     def test_recovery_is_a_separate_email_without_reusable_help_link(self):
         with self.server() as (server,sender), tempfile.TemporaryDirectory() as tmp:

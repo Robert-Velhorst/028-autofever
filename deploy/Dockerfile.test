@@ -6,7 +6,7 @@ RUN python -m pip install --no-cache-dir --require-hashes -r backend/requirement
 COPY backend/*.py /app/backend/
 COPY backend/smtp.example.json /app/backend/
 COPY backend/tests/*.py /app/backend/tests/
-COPY deploy/__init__.py deploy/host_preflight.py /app/deploy/
+COPY deploy/__init__.py deploy/host_preflight.py deploy/028-autofever-worker.service /app/deploy/
 COPY backend/static/*.js backend/static/*.css backend/static/*.html backend/static/*.svg /app/backend/static/
 COPY illness-preview/index.html /app/illness-preview/index.html
 COPY illness-preview/i18n.js /app/illness-preview/i18n.js

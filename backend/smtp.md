@@ -27,12 +27,14 @@ Autofever now has a concrete SMTP adapter and queue worker. They have been teste
 | `help_origin` | Verified public HTTPS Autofever origin, without path, trailing slash, query, credentials or fragment |
 | `allowed_recipients` | Explicit list of approved plain ASCII email addresses; not a wildcard or consent inferred from imported contacts |
 
-The process environment must privately supply:
+Manual CLI invocations may privately supply:
 
 - `AUTOFEVER_SMTP_PASSWORD`: SMTP credential, never written to the JSON file or a command argument.
 - `AUTOFEVER_STORE_KEY_HEX`: the existing dedicated store's 32-byte key, encoded as 64 hex characters.
 
-The CLI removes these values from its process environment after reading them; they necessarily remain in process memory while needed. Do not print environment values, enable SMTP debug output or attach real message/credential dumps to bug reports. Python/system instrumentation and provider logs are outside the application's no-logging guarantee. Config object representations do not expose fields. SMTP errors are mapped to generic outcomes; provider response text, credentials and message bodies are not persisted as diagnostic strings.
+The CLI also accepts both credentials as private files with `--store-key-file` and `--smtp-password-file`; use both flags together. Files must be regular, nonsymlink, bounded, and inaccessible to group/other users on POSIX. The key file contains 64 lowercase hexadecimal characters, optionally followed by a newline; the password file contains the ASCII password and may have one final newline. SMTP configuration is likewise required to be a private regular file. These file options are intended for systemd's credential directory and avoid placing secrets in process arguments or environment variables. Mixing file and environment credentials fails closed.
+
+The CLI removes environment credentials after reading them; file credentials necessarily remain in process memory while needed. Do not print environment values, enable SMTP debug output or attach real message/credential dumps to bug reports. Python/system instrumentation and provider logs are outside the application's no-logging guarantee. Config object representations do not expose fields. SMTP errors are mapped to generic outcomes; provider response text, credentials and message bodies are not persisted as diagnostic strings.
 
 The supported mailbox subset excludes display names, quoted local-parts, internationalized mailbox addresses and SMTPUTF8. Message bodies themselves support Unicode. SMTP credentials are currently ASCII. These restrictions fail explicitly; addresses are not transliterated or guessed. Sender identity/domain authorization, recipient consent and provider conditions still require operator review.
 
@@ -44,6 +46,12 @@ Local checks only:
 
 ```powershell
 ./backend/.venv/Scripts/python.exe -m backend.worker --database C:/private/autofever/state.sqlite3 --smtp-config C:/private/autofever/smtp.json --check
+```
+
+When using private credential files instead of environment values:
+
+```powershell
+./backend/.venv/Scripts/python.exe -m backend.worker --database C:/private/autofever/state.sqlite3 --smtp-config C:/private/autofever/smtp.json --store-key-file C:/private/autofever/store-key --smtp-password-file C:/private/autofever/smtp-password --check
 ```
 
 This checks the existing store/key and configuration shape. It performs **no network calls and no queue consumption**. It does not verify provider credentials, account permissions, the public app URL, allowlist coverage of saved profiles, DNS authentication, inbox receipt or production readiness.
@@ -62,7 +70,9 @@ Or run continuously until stopped:
 
 There is no implicit send mode. Without `--check` or `--send`, the CLI refuses to run. Bounded mode defaults to one attempt and accepts at most 100. Exit 0 means the invocation finished, **not that messages were delivered**. Exit 2 is local configuration/argument failure; exit 3 requires SMTP account/configuration attention; exit 1 is an internal worker failure. SIGINT/SIGTERM request a graceful stop after the current attempt. A forced process kill leaves the existing lease mechanism to quarantine uncertain work.
 
-Continuous mode processes already queued illness, recovery and [explicit update](updates.md) emails; it does **not** send check-in reminders, run recurring tasks, escalate to backup helpers, create automatic updates or use fallback channels. Owner check-ins are in-app only and require the owner to open Autofever. Update emails have their own stable queue/Message-ID and subject, one private recipient, plain text and no renewed personal link. Use one SMTP worker per configured account until a shared account-level rate limiter has been implemented. Per-process cooldown is not a distributed quota mechanism. No OS service, scheduled task, cloud resource or deployment is created by these commands in this change.
+Continuous mode processes already queued illness, recovery and [explicit update](updates.md) emails; it does **not** send check-in reminders, run recurring tasks, escalate to backup helpers, create automatic updates or use fallback channels. Owner check-ins are in-app only and require the owner to open Autofever. Update emails have their own stable queue/Message-ID and subject, one private recipient, plain text and no renewed personal link. Use one SMTP worker per configured account until a shared account-level rate limiter has been implemented. Per-process cooldown is not a distributed quota mechanism.
+
+An optional [systemd worker template](../deploy/028-autofever-worker.service) runs the existing CLI continuously with explicit `--send`, using private systemd credentials for the store key, SMTP password and SMTP configuration. It is not installed or enabled by this repository. Do not start or enable it until the provider/account, sender identity, approved recipient allowlist, public help origin, credentials and delivery procedures are qualified. Enabling it authorizes queued explicit illness, recovery and update emails to be sent; it does not authorize check-in reminders because no check-in jobs are created.
 
 ## Delivery-state semantics
 
@@ -87,10 +97,10 @@ Protocol references: [Python SMTP client documentation](https://docs.python.org/
 3. Verify the real public `/help` URL, capability expiry, TLS, recipient privacy and mobile behavior. `help_origin` validation checks syntax only; it cannot prove a deployed app exists.
 4. Verify the chosen provider's authentication, domain authorization, limits and security requirements. There is no automatic DNS modification or provider signup.
 5. Perform a separately authorized test to an approved real address and inspect actual receipt, failures and recovery. Local SMTP tests are not that proof.
-6. Qualify the [private uncertain-send review procedure](reconciliation.md) with the chosen provider, including how to obtain authoritative evidence. Complete credential rotation, backup/restore, retention, monitoring and operator procedures. A failed or uncertain job is never reset by editing SQL to force another send. Explicit requeue through the review tool is allowed only after verified non-acceptance and still enforces attempt/expiry limits. The current UI reports queue status but is not a live provider-configuration dashboard.
+6. Qualify the [private uncertain-send review procedure](reconciliation.md) with the chosen provider, including how to obtain authoritative evidence. Complete credential rotation, backup/restore, retention, monitoring and operator procedures. Only after these gates should the operator install and enable the optional worker unit. A failed or uncertain job is never reset by editing SQL to force another send. Explicit requeue through the review tool is allowed only after verified non-acceptance and still enforces attempt/expiry limits. The current UI reports queue status but is not a live provider-configuration dashboard.
 
 TLS secures the connection to the SMTP server, not end-to-end confidentiality. The provider and intended recipient can read message content and the personal link. Keep disclosures minimal; do not include a diagnosis unless deliberately configured by the user. Verify link handling in real email clients before production acceptance.
 
 ## Verification
 
-Tests use local loopback sockets, temporary test certificates and synthetic `.invalid` recipients only. They exercise implicit TLS, STARTTLS before AUTH, rejection of untrusted/mismatched certificates and missing STARTTLS, MIME/Unicode/dot-stuffing, single-recipient scope, stable Message-ID, late disconnects, definite retry, durable uncertainty, account-failure suspension, worker cooldown and graceful stop, email-only queue selection and recovery without a reusable link. The configuration-check CLI is verified not to connect or consume a job. Existing lifecycle/HTTP/browser-source tests remain separate evidence; live delivery, inbox placement, bounce callbacks and provider acceptance are unverified.
+Tests use local loopback sockets, temporary test certificates and synthetic `.invalid` recipients only. They exercise implicit TLS, STARTTLS before AUTH, rejection of untrusted/mismatched certificates and missing STARTTLS, MIME/Unicode/dot-stuffing, single-recipient scope, stable Message-ID, late disconnects, definite retry, durable uncertainty, account-failure suspension, worker cooldown and graceful stop, email-only queue selection and recovery without a reusable link. The configuration-check CLI is verified not to connect or consume a job; file-based credentials are tested against the local synthetic server. The deployment unit is checked for explicit send mode, systemd credential injection and its dedicated writable path. Existing lifecycle/HTTP/browser-source tests remain separate evidence; live delivery, inbox placement, bounce callbacks and provider acceptance are unverified.

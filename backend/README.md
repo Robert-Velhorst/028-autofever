@@ -1,6 +1,6 @@
 # Autofever service core
 
-This is the persistent backend component for the notification/help/recovery chain, with owner and recipient web interfaces. The development listener remains **local-only**; a separate [hosted HTTPS-proxy entry point and Hetzner guide](../deploy/README.md) are implemented but not deployed. A concrete [SMTP email adapter and opt-in worker](smtp.md) are implemented and locally tested, but no real provider is configured. The standalone preview still uses only browser storage; the opt-in `/owner` mode connects that same profile editor to the service. Do not expose the development listener to the internet or describe passing tests as external message-delivery evidence.
+This is the persistent backend component for the notification/help/recovery chain, with owner and recipient web interfaces. The development listener remains **local-only**; a separate [hosted HTTPS-proxy entry point and Hetzner guide](../deploy/README.md) are implemented but not deployed. A concrete [SMTP email adapter and opt-in worker](smtp.md) are implemented and locally tested. An optional [systemd worker template](../deploy/028-autofever-worker.service) is available but not installed or enabled; no real provider is configured. The standalone preview still uses only browser storage; the opt-in `/owner` mode connects that same profile editor to the service. Do not expose the development listener to the internet or describe passing tests as external message-delivery evidence.
 
 ## Run the tests
 

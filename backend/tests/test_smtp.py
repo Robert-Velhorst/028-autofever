@@ -1,3 +1,4 @@
+import os
 import smtplib
 import ssl
 import tempfile
@@ -54,12 +55,26 @@ class FakeSMTP:
 
 class SMTPTests(unittest.TestCase):
     def test_example_and_duplicate_configuration_fields(self):
-        config = load_config(Path(__file__).parents[1] / 'smtp.example.json')
+        with tempfile.TemporaryDirectory() as tmp:
+            private_example = Path(tmp) / 'smtp.json'
+            private_example.write_bytes((Path(__file__).parents[1] / 'smtp.example.json').read_bytes())
+            private_example.chmod(0o600)
+            config = load_config(private_example)
         self.assertEqual(config.host, 'smtp.example.invalid')
         self.assertEqual(config.allowed_recipients, ('approved-recipient@example.invalid',))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'duplicate.json'
             path.write_text('{"host":"smtp.example.invalid","host":"other.invalid"}', encoding='utf-8')
+            path.chmod(0o600)
+            with self.assertRaises(Invalid):
+                load_config(path)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX file-mode checks are platform-specific')
+    def test_smtp_configuration_rejects_group_or_world_readable_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'smtp.json'
+            path.write_text('{"placeholder":true}', encoding='utf-8')
+            path.chmod(0o644)
             with self.assertRaises(Invalid):
                 load_config(path)
 
