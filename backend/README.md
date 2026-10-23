@@ -4,7 +4,7 @@ This is the persistent backend component for the notification/help/recovery chai
 
 ## Run the tests
 
-Python 3.15.0 or newer is required. From the repository root, create an isolated environment:
+Python 3.15.1 or newer is required. From the repository root, create an isolated environment:
 
 ```powershell
 python -m venv backend/.venv
@@ -12,7 +12,7 @@ python -m venv backend/.venv
 ./backend/.venv/Scripts/python.exe -m unittest discover -s backend/tests -v
 ```
 
-Use CPython 3.15.0 on 64-bit Windows or Linux; these are the backend targets in [`runtime-matrix.json`](runtime-matrix.json), consumed by GitHub Actions. On Linux, the environment's Python executable is `backend/.venv/bin/python`. `requirements.txt` is the small direct-dependency input; `requirements.lock` pins every resolved dependency and accepted artifact hash for reproducible installation with pip's hash checking. Regenerate it from the direct requirements with `uv pip compile backend/requirements.txt --generate-hashes --python-version 3.15 --output-file backend/requirements.lock`, review the resolved package changes, then test a clean installation on both matrix targets. Tests create disposable SQLite files and synthetic recipients under `.invalid`, generate only test capabilities, and use injected sender functions or temporary loopback TLS SMTP servers. The HTTP integration test also uses an ephemeral loopback listener. No tests contact external providers or read the mobile preview's browser database.
+Use CPython 3.15.1 on 64-bit Windows or Linux; these are the backend targets in [`runtime-matrix.json`](runtime-matrix.json), consumed by GitHub Actions. On Linux, the environment's Python executable is `backend/.venv/bin/python`. `requirements.txt` is the small direct-dependency input; `requirements.lock` pins every resolved dependency and accepted artifact hash for reproducible installation with pip's hash checking. Regenerate it from the direct requirements with `uv pip compile backend/requirements.txt --generate-hashes --python-version 3.15 --output-file backend/requirements.lock`, review the resolved package changes, then test a clean installation on both matrix targets. Tests create disposable SQLite files and synthetic recipients under `.invalid`, generate only test capabilities, and use injected sender functions or temporary loopback TLS SMTP servers. The HTTP integration test also uses an ephemeral loopback listener. No tests contact external providers or read the mobile preview's browser database.
 
 The backend's tested platforms are 64-bit Windows and Linux. The [cryptography security upgrade](dependency-security.md) pins 50.0.2, audits the exact runtime dependencies and verifies compatibility with synthetic records/backups created under 46.0.7. That upstream upgrade no longer supports 32-bit Windows or x86_64 macOS. Platform test counts and remaining deployment gates are maintained in [deployment verification](../deploy/README.md#local-and-linux-verification).
 

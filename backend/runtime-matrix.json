@@ -2,11 +2,11 @@
   "backend": [
     {
       "os": "ubuntu-24.04",
-      "python": "3.15.0"
+      "python": "3.15.1"
     },
     {
       "os": "windows-latest",
-      "python": "3.15.0"
+      "python": "3.15.1"
     }
   ]
 }
